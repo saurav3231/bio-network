@@ -45,7 +45,7 @@ The human brain runs on roughly 20 watts, learns continuously from a single stre
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
-| M1 | Spiking neuron engine (Izhikevich model, event scheduler, spike raster) | Current |
+| M1 | Spiking neuron engine (Izhikevich model, event scheduler, spike raster) | Complete |
 | M2 | Self-organizing learning (STDP, label-free emergence) | Planned |
 | M3 | Sensory encoding (images to spike trains) | Planned |
 | M4 | Memory + sleep-phase consolidation | Planned |
@@ -57,7 +57,17 @@ See [ROADMAP.md](ROADMAP.md) for the full milestone plan.
 
 ## Getting Started
 
-Milestone 1 (spiking neuron engine) is under active development. See [ROADMAP.md](ROADMAP.md) for status and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the planned module layout. Installation and usage instructions will be added once M1 lands.
+Requires Python 3.10+. Install the package and run the tests:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+Run the M1 demonstration notebook (`notebooks/m1_first_spikes.ipynb`) to see a
+1000-neuron Izhikevich network fire, plot a spike raster, and inspect membrane
+potential traces. See [ROADMAP.md](ROADMAP.md) for the milestone plan and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module layout.
 
 ## Contributing
 

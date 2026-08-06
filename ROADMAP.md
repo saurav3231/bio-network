@@ -4,7 +4,7 @@ Milestone-based development plan for Bio Network. Each milestone is independentl
 useful and verifiable. Statuses: `Current` (in active development), `Planned`
 (not started), `Stretch` (nice to have, may not ship).
 
-## M1 -- Spiking Neuron Engine (Current)
+## M1 -- Spiking Neuron Engine (Complete)
 
 A minimal but solid spiking neural network core.
 
@@ -18,6 +18,8 @@ A minimal but solid spiking neural network core.
 
 **Exit criteria:** run a small recurrent network, render a raster plot, and
 reproduce known spiking regimes from Izhikevich 2003.
+
+**Status:** Complete. Spike conduction delays remain a planned follow-up.
 
 ## M2 -- Self-Organizing Learning
 
