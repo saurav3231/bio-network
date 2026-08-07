@@ -34,3 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outputs and saved figures in `notebooks/output/`.
 - Unit, integration, and visualization tests (`tests/test_neurons.py`,
   `tests/test_network.py`, `tests/test_viz.py`).
+
+### Added (event-driven sparse synapses)
+
+- `SparseSynapses`: a sparse, event-driven synaptic engine with axonal
+  transmission delays (`bio_network/engine/synapses_sparse.py`). CSR-style
+  flat arrays, a `(max_delay, n_neurons)` ring buffer, `O(fired x out_degree)`
+  delivery, and delays per Izhikevich (2006).
+- `scheduler.simulate(..., engine="sparse")`: a drop-in alternative to the
+  dense reference with statistically equivalent behavior.
+- `benchmarks/m1_dense_vs_sparse.py`: wall-time, peak-RAM, and firing-rate
+  comparison across N = 1k/10k/50k.
+- Sparse engine tests (`tests/test_sparse.py`): delay correctness,
+  determinism, Dale's principle, sparsity, statistical equivalence with dense,
+  a 50k-neuron memory ceiling, and NaN/Inf checks.
+- `docs/M1_RESULTS.md` recording the verified M1 baseline.

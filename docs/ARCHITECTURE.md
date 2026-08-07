@@ -41,6 +41,38 @@ by processing spike events only when they occur, rather than stepping the whole
 network at every tick. This is the performance-sensitive part and the natural
 candidate for a later Rust core.
 
+### Event-driven synaptic delivery
+
+The dense engine in `synapses.py` computes every synapse every millisecond --
+including the 95 %+ that carry no spike. Real brains are sparse and
+event-driven: a synapse only matters when a spike arrives, and spikes take
+1-20 ms to travel along an axon. The alternative engine
+(`synapses_sparse.py`) implements this:
+
+- Each neuron projects to `out_degree` distinct random targets, stored in
+  CSR-style flat arrays (`targets`, `weights`, `delays`, per-neuron
+  `offsets`). No `N x N` matrix is kept anywhere, so memory scales as
+  `O(N * out_degree)` instead of `O(N^2)`.
+- Dale's principle is unchanged: excitatory outgoing weights uniform in
+  `[0, 0.5]`, inhibitory outgoing weights uniform in `[-1, 0]`.
+- Delays follow Izhikevich (2006): excitatory synapses draw a uniform integer
+  delay in 1-20 ms; inhibitory synapses are fixed at 1 ms.
+- Delivery is event-driven through a preallocated ring buffer of shape
+  `(max_delay, n_neurons)`: firing a neuron touches only its `out_degree`
+  targets, so the cost per step is `O(fired x out_degree)`, never `O(N^2)`.
+
+The scheduler exposes both engines through `simulate(..., engine="dense" |
+"sparse")`. Trajectories are chaotic, so the two engines diverge after ~100 ms
+and agree only statistically (rates, ISI distributions, rhythmicity), not
+spike-for-spike.
+
+References:
+
+- Izhikevich, E. M. (2003). Simple model of spiking neurons.
+  *IEEE Transactions on Neural Networks*, 14(6), 1569--1572.
+- Izhikevich, E. M. (2006). Polychronization: computation with spikes.
+  *Neural Computation*, 18(2), 245--282.
+
 ### `bio_network/learning/` -- synaptic plasticity
 
 Local learning rules. The first rule is spike-timing-dependent plasticity

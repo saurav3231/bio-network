@@ -13,6 +13,7 @@ import numpy as np
 
 from bio_network.engine.neurons import IzhikevichPopulation
 from bio_network.engine.synapses import RandomSynapses
+from bio_network.engine.synapses_sparse import SparseSynapses
 
 StimulusFn = Callable[[float, int], np.ndarray]
 
@@ -54,27 +55,40 @@ class SpikeRecording:
 
 def simulate(
     population: IzhikevichPopulation,
-    synapses: RandomSynapses,
+    synapses: RandomSynapses | SparseSynapses | None = None,
     T_ms: float = 1000.0,
     stimulus_fn: StimulusFn | None = None,
     seed: int = 42,
+    engine: str = "dense",
 ) -> SpikeRecording:
     """Run the network for ``T_ms`` milliseconds.
 
     Args:
         population: the spiking neuron population to advance.
-        synapses: the synaptic weight matrix driving the population.
+        synapses: the synaptic engine driving the population. If None, a
+            matching engine is built automatically from the population size:
+            ``RandomSynapses`` for ``engine="dense"`` and ``SparseSynapses``
+            for ``engine="sparse"``.
         T_ms: simulation duration in milliseconds.
         stimulus_fn: optional ``stimulus_fn(t_ms, n_neurons)`` returning the
             input current array for every neuron at that millisecond. If None,
             a default thalamic noise drive is used: ``5 * randn`` for
             excitatory neurons and ``2 * randn`` for inhibitory neurons, as in
             Izhikevich (2003).
-        seed: random seed for the default stimulus.
+        seed: random seed for the default stimulus and any auto-built engine.
+        engine: ``"dense"`` (the M1 golden reference, byte-for-byte unchanged)
+            or ``"sparse"`` (event-driven with axonal delays).
 
     Returns:
         A ``SpikeRecording`` of all spikes. Synaptic current from spikes at
-        time ``t`` is added to the stimulus at time ``t + 1``.
+        time ``t`` is added to the stimulus at time ``t + 1`` (dense) or is
+        scheduled through the delay ring buffer (sparse).
+
+    Notes on equivalence:
+        Dense and sparse trajectories diverge after roughly 100 ms of simulated
+        time because the system is chaotic and the summation order differs.
+        Equivalence is statistical (rates, ISI distributions, rhythmicity), not
+        spike-exact. This is expected physics, not a bug.
     """
     rng = np.random.default_rng(seed)
     n_neurons = population.v.size
@@ -83,6 +97,46 @@ def simulate(
 
     times_list: list[float] = []
     indices_list: list[int] = []
+
+    if engine == "sparse":
+        if synapses is None:
+            synapses = SparseSynapses(
+                n_excit=n_excitatory,
+                n_inhib=n_neurons - n_excitatory,
+                seed=seed,
+            )
+        for t in range(steps):
+            if stimulus_fn is not None:
+                current = np.asarray(stimulus_fn(float(t), n_neurons), dtype=float)
+            else:
+                current = np.zeros(n_neurons)
+                current[:n_excitatory] = 5.0 * rng.standard_normal(n_excitatory)
+                current[n_excitatory:] = 2.0 * rng.standard_normal(
+                    n_neurons - n_excitatory
+                )
+            current = current + synapses.currents(t)
+
+            fired = population.step(current)
+            if fired.size:
+                times_list.extend([float(t)] * int(fired.size))
+                indices_list.extend(int(i) for i in fired)
+                synapses.deliver(fired, t)
+
+        return SpikeRecording(
+            times_ms=np.asarray(times_list, dtype=float),
+            indices=np.asarray(indices_list, dtype=np.int64),
+            n_neurons=n_neurons,
+            duration_ms=float(T_ms),
+            is_excitatory=population.is_excitatory.copy(),
+        )
+
+    # engine == "dense": the M1 golden reference implementation, unchanged.
+    if synapses is None:
+        synapses = RandomSynapses(
+            n_pre_excit=n_excitatory,
+            n_pre_inhib=n_neurons - n_excitatory,
+            seed=seed,
+        )
     synaptic = np.zeros(n_neurons)
 
     for t in range(steps):
