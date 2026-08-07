@@ -96,6 +96,63 @@ post-synaptic spike and weakens in the reverse order, following the qualitative
 window of Bi & Poo 1998. Rules are local -- each synapse only needs the timing
 of its own pre- and post-synaptic spikes.
 
+### STDP (M2) -- spike-timing-dependent plasticity
+
+STDP is implemented directly inside the sparse engine
+(`SparseSynapses.enable_learning`, `synapses_sparse.py`) so the plasticity
+updates run event-driven alongside spike delivery; there is no separate
+`stdp.py` module, because the rule needs the engine's arrival ledger and ring
+buffer to be computed on the exact spike timing.
+
+Rule details:
+
+- **Excitatory-only, with hard bounds.** Only outgoing excitatory synapses are
+  plastic. Weights are clamped to `[0, 1]` (normalized bounds of Song, Miller
+  & Abbott 2000) before the `gain` scale is applied downstream. Inhibitory
+  weights are frozen: E/I balance is what keeps the recurrent network stable,
+  and letting inhibition grow is the classic road to runaway activity.
+- **Asymmetric amplitudes.** `A_plus = 0.10` (LTP) and `A_minus = 0.12`
+  (LTD). Depression slightly stronger than potentiation is the Song-Miller-
+  Abbott stability mechanism: in a steady state the potentiation events
+  slightly outnumber the depression events (pairing-rate asymmetry), and the
+  `A_minus > A_plus` tilt keeps the mean weight bounded away from the ceiling.
+- **Exact lazy traces.** Every plastic synapse keeps a pre-trace
+  (`syn_trace`) and every neuron a post-trace (`post_trace`), each with a
+  "last updated" timestamp. Traces decay exponentially with time constants
+  `tau_plus = tau_minus = 20 ms` but the exponential is only evaluated at the
+  moment the trace is *used*, never every millisecond (event-driven).
+- **Causality is measured at arrival time.** A synapse is potentiated or
+  depressed based on the **arrival** of the pre-synaptic spike at the
+  post-synaptic neuron (after the axonal delay), not the emission time. This
+  matters: an axon's conduction delay is 1-20 ms, which is of the same order
+  as the STDP window, so emission-time causality would systematically mislabel
+  many pre/post orderings. The engine books every fired excitatory synapse
+  into an arrival ledger at delivery time and applies LTD + the pre-trace
+  increment at the exact arrival millisecond; LTP and the post-trace refresh
+  run when the post-synaptic neuron fires.
+- **Learning toggle and freeze.** `simulate(..., learning=True)` enables STDP;
+  `freeze_at_ms` stops weight updates after a given simulated time while
+  spikes keep propagating, which provides the train/test split used by the M2
+  experiments (training phase, then a frozen test phase).
+- **Gain = 8 for all M2 training.** The calibrated sparse engine runs near
+  ~10 Hz at `gain = 10`; learning uses `gain = 8` so LTP has headroom below
+  the ~160 Hz avalanche regime (see `docs/M1_5_RESULTS.md` for the fan-in /
+  gain discussion).
+
+Experiment results are recorded in `docs/M2_RESULTS.md`; the running notebook
+is `notebooks/m2_fire_together.ipynb`.
+
+References:
+
+- Bi, G., & Poo, M.-m. (1998). Synaptic modifications in cultured hippocampal
+  neurons: dependence on spike timing, synaptic strength, and postsynaptic
+  cell type. *Journal of Neuroscience*, 18(24), 10464--10472.
+- Song, S., Miller, K. D., & Abbott, L. F. (2000). Competitive Hebbian learning
+  through spike-timing-dependent synaptic plasticity. *Nature Neuroscience*,
+  3(9), 919--926.
+- van Vreeswijk, C., & Sompolinsky, H. (1998). Chaotic balanced state in a
+  model of cortical circuits. *Neural Computation*, 10(6), 1321--1371.
+
 ### `bio_network/memory/` -- episodic store and replay
 
 Fast one-shot memory. The episodic store (`episodic.py`) records spike events

@@ -59,3 +59,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   theory, van Vreeswijk & Sompolinsky 1998) in `docs/ARCHITECTURE.md`.
 - Added `docs/M1_5_RESULTS.md` recording the gain sweep and the dense N=10k
   saturation event ("dense fan-in scaling trap", first recorded pathology).
+
+### Added (M2: self-organizing STDP learning)
+
+- STDP on the sparse event-driven engine (`SparseSynapses.enable_learning`):
+  arrival-time causality (the booked arrival ledger applies LTD and the
+  pre-trace at the exact arrival millisecond), exact lazy exponential traces
+  (`tau_plus = tau_minus = 20 ms`), asymmetric amplitudes (`A_plus = 0.10`,
+  `A_minus = 0.12`), hard `[0, 1]` bounds, and excitatory-only plasticity with
+  frozen inhibitory weights (Song-Miller-Abbott stability).
+- `simulate(..., learning=True, freeze_at_ms=None)`: STDP toggle and train/test
+  freeze (`bio_network/engine/scheduler.py`).
+- Micro- and mesoscopic unit tests (`tests/test_stdp.py`): causal/non-causal
+  windows, gate dependence, bounds, bit-identical no-learning control,
+  reproducibility, stability, and frozen-inhibitory guarantee.
+- Experiments (`benchmarks/m2_stdp_experiments.py`): hallmark stability
+  (E1), fire-together / wire-together (E2, ratio 1.72 > 1.5), and cue /
+  pattern-completion (E3, honestly negative: ~1.02x).
+- `docs/M2_RESULTS.md` and `notebooks/m2_fire_together.ipynb` (with executed
+  outputs) and `notebooks/output/m2_hallmark.png`. STDP documented in
+  `docs/ARCHITECTURE.md`; M2 marked Complete in `ROADMAP.md`.

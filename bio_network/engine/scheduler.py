@@ -60,6 +60,8 @@ def simulate(
     stimulus_fn: StimulusFn | None = None,
     seed: int = 42,
     engine: str = "dense",
+    learning: bool = False,
+    freeze_at_ms: float | None = None,
 ) -> SpikeRecording:
     """Run the network for ``T_ms`` milliseconds.
 
@@ -78,6 +80,13 @@ def simulate(
         seed: random seed for the default stimulus and any auto-built engine.
         engine: ``"dense"`` (the M1 golden reference, byte-for-byte unchanged)
             or ``"sparse"`` (event-driven with axonal delays).
+        learning: enable STDP (M2). Only supported by the sparse engine; it
+            calls ``SparseSynapses.enable_learning()`` on the provided (or
+            auto-built) engine before the run.
+        freeze_at_ms: if given, plasticity stops being applied at this
+            simulated time (milliseconds). This "freeze" is used to switch
+            from a training phase to a frozen test phase. Spikes continue to
+            propagate; only the weight updates stop.
 
     Returns:
         A ``SpikeRecording`` of all spikes. Synaptic current from spikes at
@@ -105,7 +114,11 @@ def simulate(
                 n_inhib=n_neurons - n_excitatory,
                 seed=seed,
             )
+        if learning:
+            synapses.enable_learning()
+        learn = learning
         for t in range(steps):
+            learn_now = learn and (freeze_at_ms is None or t < freeze_at_ms)
             if stimulus_fn is not None:
                 current = np.asarray(stimulus_fn(float(t), n_neurons), dtype=float)
             else:
@@ -114,13 +127,14 @@ def simulate(
                 current[n_excitatory:] = 2.0 * rng.standard_normal(
                     n_neurons - n_excitatory
                 )
-            current = current + synapses.currents(t)
+            current = current + synapses.currents(t, learn=learn_now)
 
             fired = population.step(current)
             if fired.size:
                 times_list.extend([float(t)] * int(fired.size))
                 indices_list.extend(int(i) for i in fired)
-                synapses.deliver(fired, t)
+                synapses.on_firing(fired, t, learn=learn_now)
+                synapses.deliver(fired, t, learn=learn_now)
 
         return SpikeRecording(
             times_ms=np.asarray(times_list, dtype=float),

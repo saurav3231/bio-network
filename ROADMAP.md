@@ -21,12 +21,20 @@ reproduce known spiking regimes from Izhikevich 2003.
 
 **Status:** Complete. Spike conduction delays remain a planned follow-up.
 
-## M2 -- Self-Organizing Learning
+## M2 -- Self-Organizing Learning (Complete)
 
-- Spike-timing-dependent plasticity (STDP) local learning rule
-  (`bio_network/learning/stdp.py`).
+- Spike-timing-dependent plasticity (STDP) local learning rule, event-driven on
+  the sparse engine (`SparseSynapses.enable_learning`; see `docs/ARCHITECTURE.md`).
 - Unsupervised structure emergence: inputs self-organize into stable, selective
   response patterns without labels.
+
+**Exit criteria:** run a recurrent network, render a raster plot, and
+reproduce known spiking regimes from Izhikevich 2003.
+
+**Status:** Complete. STDP produces a stable, bimodal weight distribution
+(E1) and a "fire-together, wire-together" association (E2, mean A->B vs A->C
+ratio 1.72 > 1.5) in `docs/M2_RESULTS.md`. Cue/pattern completion (E3) was
+explored and honestly reported as absent under the current gain/layout.
 
 ## M3 -- Sensory Encoding
 

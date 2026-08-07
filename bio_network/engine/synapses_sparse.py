@@ -21,6 +21,7 @@ from __future__ import annotations
 import numpy as np
 
 _DEFAULT_OUT_DEGREE = 100
+_TRACE_NEVER = -1.0e18
 _DEFAULT_MAX_DELAY = 20  # ms, per the range of excitatory axonal delays.
 
 
@@ -118,6 +119,75 @@ class SparseSynapses:
         # Pre-allocation of the ring buffer for axonal transmission.
         self._queue = np.zeros((max_delay, n_neurons), dtype=np.float32)
 
+        # STDP (M2) state. Everything here is lazily allocated the first time
+        # `enable_learning()` is called, so the ordinary sparse engine (used by
+        # the M1.5 benchmarks and the 50k memory test) pays nothing for it.
+        self._learning_enabled = False
+        self._a_plus = 0.1
+        self._a_minus = 0.12
+        self._tau_plus = 20.0
+        self._tau_minus = 20.0
+        self._syn_trace = None
+        self._syn_last = None
+        self._post_trace = None
+        self._post_last = None
+        self._in_syn = None
+        self._in_offsets = None
+        self._arrivals = None
+
+    # -- plasticity helpers -----------------------------------------------
+    def enable_learning(
+        self,
+        a_plus: float = 0.1,
+        a_minus: float = 0.12,
+        tau_plus: float = 20.0,
+        tau_minus: float = 20.0,
+    ) -> None:
+        """Enable STDP and lazily allocate the plasticity state.
+
+        Excitatory weights are plastic; inhibitory weights are frozen (see
+        ``docs/ARCHITECTURE.md``). Rule follows Bi & Poo (1998) with the stable
+        range (normalized) bounds of Song, Miller & Abbott (2000).
+
+        Args:
+            a_plus: potentiation amplitude (LTP occurs on causal order).
+            A_minus: depression amplitude (LTD occurs on causal order).
+                Slightly larger than ``A_plus`` (``0.12 > 0.1``) so depression
+                balances potentiation and keeps the network stable.
+            tau_plus: LTP time constant, in ms (Bi & Poo window).
+            tau_minus: LTD time constant, in ms.
+        """
+        self._a_plus = float(a_plus)
+        self._a_minus = float(a_minus)
+        self._tau_plus = float(tau_plus)
+        self._tau_minus = float(tau_minus)
+        self._learning_enabled = True
+
+        if self._syn_trace is not None:
+            return
+        n_syn = self._n_synapses
+        n_neurons = self.n_neurons
+        self._syn_trace = np.zeros(n_syn, dtype=np.float64)
+        self._syn_last = np.full(n_syn, _TRACE_NEVER)
+        self._post_trace = np.zeros(n_neurons, dtype=np.float64)
+        self._post_last = np.full(n_neurons, _TRACE_NEVER)
+        self._arrivals = [[] for _ in range(self.max_delay)]
+
+        # Reverse (incoming) adjacency for LTP: the incoming synapses of each
+        # neuron are the plastic excitatory synapses that target it.
+        incoming: list[list[int]] = [[] for _ in range(n_neurons)]
+        targets = self.targets
+        n_pooled = self.n_excit * self.out_degree  # flat excitatory block
+        for s in range(n_pooled):
+            incoming[int(targets[s])].append(s)
+        lengths = np.fromiter((len(b) for b in incoming), dtype=np.int64)
+        self._in_offsets = np.concatenate(([0], np.cumsum(lengths))).astype(np.int64)
+        flat = np.empty(int(self._in_offsets[-1]), dtype=np.int64)
+        for j, bucket in enumerate(incoming):
+            start = int(self._in_offsets[j])
+            flat[start : start + len(bucket)] = bucket
+        self._in_syn = flat
+
     # -- public graph size ------------------------------------------------
     @property
     def n_synapses(self) -> int:
@@ -125,7 +195,7 @@ class SparseSynapses:
         return self._n_synapses
 
     # ---- event-driven delivery ------------------------------------------
-    def deliver(self, fired: np.ndarray, t: int) -> None:
+    def deliver(self, fired: np.ndarray, t: int, learn: bool = False) -> None:
         """Deliver the outgoing weights of the spikes fired at time ``t``.
 
         For each fired pre-synaptic neuron, each of its outgoing weights is
@@ -133,9 +203,15 @@ class SparseSynapses:
         ``(t + delay) % max_delay``. Work is proportional to ``len(fired) *
         out_degree`` and is never quadratic in the population.
 
+        When ``learn`` is True the fired synapses are also booked into the
+        arrival ledger so the LTD/plasticity updates can run on the exact
+        millisecond each spike arrives (``currents`` processes them).
+
         Args:
             fired: indices of pre-synaptic neurons that spiked at time ``t``.
             t: the current simulated time step (milliseconds).
+            learn: record arrival events for STDP (must follow
+                ``enable_learning``).
         """
         if fired.size == 0:
             return
@@ -145,6 +221,7 @@ class SparseSynapses:
         delays = self.delays
         queue = self._queue
         max_delay = self.max_delay
+        t = int(t)
 
         for i in fired:
             start = int(offsets[i])
@@ -156,19 +233,116 @@ class SparseSynapses:
             # across neurons correctly.
             queue[slot, row] += weights[start:end]
 
-    def currents(self, t: int) -> np.ndarray:
+        if learn and self._learning_enabled:
+            # Book every fired excitatory synapse for arrival-time LTD,
+            # bucketed by the ring-buffer slot it will arrive in.
+            ids = np.concatenate(
+                [
+                    np.arange(int(offsets[i]), int(offsets[i + 1]))
+                    for i in fired
+                    if int(offsets[i + 1]) > int(offsets[i])
+                ]
+            )
+            if ids.size:
+                slot_arr = (t + delays[ids]) % max_delay
+                for s in np.unique(slot_arr):
+                    self._arrivals[int(s)].append(ids[slot_arr == s])
+
+    def currents(self, t: int, learn: bool = False) -> np.ndarray:
         """Return the post-synaptic current scheduled to arrive at time ``t``.
 
         Reads slot ``t % max_delay``, zeroes it for the next use of that slot,
         and returns a copy so callers may mutate it freely.
 
+        When ``learn`` is True and ``enable_learning`` has been called, every
+        synapse arriving at time ``t`` first applies its LTD update (weights
+        are depressed by the post-synaptic trace) and marks its pre-synaptic
+        trace, which is then used for LTP when the post-synaptic neuron fires.
+
         Args:
             t: the current time step (milliseconds).
+            learn: apply the arrival-time half of STDP.
 
         Returns:
             The per-neuron synaptic input current for time ``t``.
         """
+        t = int(t)
         slot = t % self.max_delay
         row = self._queue[slot].copy()
         self._queue[slot] = 0.0
+
+        if learn and self._learning_enabled:
+            arrivals = self._arrivals[slot]
+            if arrivals:
+                syn = np.concatenate(arrivals)
+                arrivals.clear()
+                post = self.targets[syn]
+                dt_post = t - self._post_last[post]
+                traces = np.where(
+                    self._post_last[post] == _TRACE_NEVER,
+                    0.0,
+                    self._post_trace[post]
+                    * np.exp(-np.maximum(dt_post, 0.0) / self._tau_minus),
+                )
+                w = self.weights[syn] - self._a_minus * traces
+                np.clip(w, 0.0, 1.0, out=w)
+                self.weights[syn] = w
+                dt_syn = t - self._syn_last[syn]
+                syn_trace = np.where(
+                    self._syn_last[syn] == _TRACE_NEVER,
+                    0.0,
+                    self._syn_trace[syn]
+                    * np.exp(-np.maximum(dt_syn, 0.0) / self._tau_plus),
+                )
+                self._syn_trace[syn] = syn_trace + 1.0
+                self._syn_last[syn] = t
         return row
+
+    def on_firing(self, fired: np.ndarray, t: int, learn: bool = False) -> None:
+        """Apply the LTP half of STDP after the neurons in ``fired`` spike.
+
+        For every plastic (excitatory) synapse targeting a neuron that spiked
+        at time ``t``, the weight is potentiated in proportion to how much
+        pre-synaptic activity arrived at that synapse recently (its trace).
+        Post-synaptic traces are then refreshed for the next LTD window.
+
+        Args:
+            fired: indices of the neurons that spiked at time ``t``.
+            t: the current simulated time step (milliseconds).
+            learn: apply plasticity. When False (e.g. after ``freeze_at_ms``)
+                no weights change and post-synaptic traces are not refreshed.
+        """
+        if fired.size == 0 or not self._learning_enabled or not learn:
+            return
+        t = int(t)
+        in_syn = self._in_syn
+        in_offsets = self._in_offsets
+
+        # Gather the (disjoint) incoming excitatory synapse blocks of every
+        # neuron that fired, then potentiate them in one vectorized pass.
+        blocks = [
+            in_syn[int(in_offsets[post]) : int(in_offsets[post + 1])] for post in fired
+        ]
+        syn_ids = np.concatenate(blocks) if blocks else np.empty(0, dtype=np.int64)
+        if syn_ids.size:
+            dt = t - self._syn_last[syn_ids]
+            trace = np.where(
+                self._syn_last[syn_ids] == _TRACE_NEVER,
+                0.0,
+                self._syn_trace[syn_ids]
+                * np.exp(-np.maximum(dt, 0.0) / self._tau_plus),
+            )
+            w = self.weights[syn_ids] + self._a_plus * trace
+            np.clip(w, 0.0, 1.0, out=w)
+            self.weights[syn_ids] = w
+
+        # Refresh the post-synaptic trace of every neuron that fired.
+        dt_post = t - self._post_last[fired]
+        post_trace = np.where(
+            self._post_last[fired] == _TRACE_NEVER,
+            0.0,
+            self._post_trace[fired]
+            * np.exp(-np.maximum(dt_post, 0.0) / self._tau_minus),
+        )
+        self._post_trace[fired] = post_trace + 1.0
+        self._post_last[fired] = t
