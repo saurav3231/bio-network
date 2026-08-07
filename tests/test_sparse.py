@@ -144,6 +144,25 @@ def test_sparse_memory_ceiling() -> None:
     assert peak < 300 * 1024 * 1024
 
 
+def test_gain_scales_only_excitatory_weights() -> None:
+    """gain rescales excitatory weights and leaves inhibitory weights intact."""
+    base = SparseSynapses(n_excit=200, n_inhib=50, out_degree=15, seed=SEED)
+    scaled = SparseSynapses(n_excit=200, n_inhib=50, out_degree=15, seed=SEED, gain=2.5)
+    for i in range(250):
+        start = int(base.offsets[i])
+        end = int(base.offsets[i + 1])
+        if i < 200:
+            np.testing.assert_allclose(
+                scaled.weights[start:end], base.weights[start:end] * 2.5
+            )
+            assert np.all(scaled.weights[start:end] >= 0.0)
+        else:
+            np.testing.assert_allclose(
+                scaled.weights[start:end], base.weights[start:end]
+            )
+            assert np.all(scaled.weights[start:end] <= 0.0)
+
+
 def test_sparse_no_nan_or_inf() -> None:
     population = IzhikevichPopulation(seed=SEED)
     simulate(population, make_sparse(), T_ms=T_MS, seed=SEED, engine="sparse")

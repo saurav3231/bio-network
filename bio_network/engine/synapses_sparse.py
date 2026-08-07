@@ -39,6 +39,17 @@ class SparseSynapses:
     Spike delivery is O(fired x out_degree), never O(n^2): a driven spike is
     fanned out to its post-synaptic targets through a preallocated ring buffer
     of shape ``(max_delay, n_neurons)``.
+
+    The ``gain`` parameter scales the excitatory weights at construction. In a
+    recurrent network the mean firing rate is controlled by the balance of
+    excitation and inhibition, and that balance depends on the number of
+    inputs each neuron receives (its fan-in). In balanced network theory
+    (van Vreeswijk & Sompolinsky, 1998) neurons remain in a fluctuating
+    regime only when excitation and inhibition track the fan-in; halving the
+    fan-in without re-scaling weights pushes the network toward a low-gain,
+    quieter regime. ``gain`` re-establishes the excitatory drive lost by the
+    reduced fan-in of sparse connectivity (out_degree << N) so a sparse
+    engine can reproduce the dense engine's mean rate.
     """
 
     def __init__(
@@ -48,6 +59,7 @@ class SparseSynapses:
         out_degree: int = _DEFAULT_OUT_DEGREE,
         seed: int = 42,
         max_delay: int = _DEFAULT_MAX_DELAY,
+        gain: float = 1.0,
     ) -> None:
         """Initialize the sparse synaptic graph.
 
@@ -57,11 +69,16 @@ class SparseSynapses:
             out_degree: number of distinct post-synaptic targets per neuron.
             seed: random seed; a given seed always builds the identical graph.
             max_delay: the ring buffer length, in milliseconds.
+            gain: multiplicative scale applied to excitatory weights. The
+                neutral value is 1.0 (identity). At ``out_degree=100`` a gain
+                of ``10.0`` reproduces the dense baseline mean rate (see
+                ``docs/M1_5_RESULTS.md`` for the calibration sweep).
         """
         self.n_excit = n_excit
         self.n_inhib = n_inhib
         self.out_degree = out_degree
         self.max_delay = max_delay
+        self.gain = float(gain)
 
         n_neurons = n_excit + n_inhib
         self.n_neurons = n_neurons
@@ -87,7 +104,9 @@ class SparseSynapses:
             )
             if i < n_excit:
                 # excitatory pre-synaptic neuron: positive weights.
-                self.weights[start:end] = rng.uniform(0.0, 0.5, size=out_degree)
+                self.weights[start:end] = (
+                    rng.uniform(0.0, 0.5, size=out_degree) * self.gain
+                )
                 # delays 1..20 integer ms.
                 self.delays[start:end] = rng.integers(1, max_delay + 1, size=out_degree)
             else:

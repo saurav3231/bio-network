@@ -66,12 +66,27 @@ The scheduler exposes both engines through `simulate(..., engine="dense" |
 and agree only statistically (rates, ISI distributions, rhythmicity), not
 spike-for-spike.
 
+**Fan-in controls the mean rate (balanced-network theory).** The dense engine
+gives every neuron a fan-in of `~N` (it sums all fired columns); the sparse
+engine gives each neuron a fan-in of only `out_degree`. In a recurrent network
+the mean firing rate tracks the balance of excitation and inhibition, and that
+balance must be re-normalized as the fan-in changes. In balanced network theory
+(van Vreeswijk & Sompolinsky, 1998) neurons sit in a fluctuating, near-threshold
+regime only when the total recurrent input grows linearly with the fan-in;
+shrinking the fan-in without rescaling the weights pulls the network into a
+lower-gain, quieter regime (the sparse engine idles near ~5 Hz while dense
+sits near ~10 Hz). The excitatory `gain` parameter of `SparseSynapses`
+re-establishes that drive: at `out_degree=100` a gain of `10.0` reproduces the
+dense baseline mean rate (calibration in `docs/M1_5_RESULTS.md`).
+
 References:
 
 - Izhikevich, E. M. (2003). Simple model of spiking neurons.
   *IEEE Transactions on Neural Networks*, 14(6), 1569--1572.
 - Izhikevich, E. M. (2006). Polychronization: computation with spikes.
   *Neural Computation*, 18(2), 245--282.
+- van Vreeswijk, C., & Sompolinsky, H. (1998). Chaotic balanced state in a model
+  of cortical circuits. *Neural Computation*, 10(6), 1321--1371.
 
 ### `bio_network/learning/` -- synaptic plasticity
 

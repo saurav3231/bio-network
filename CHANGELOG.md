@@ -49,3 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   determinism, Dale's principle, sparsity, statistical equivalence with dense,
   a 50k-neuron memory ceiling, and NaN/Inf checks.
 - `docs/M1_RESULTS.md` recording the verified M1 baseline.
+
+### Fixed (sparse gain calibration)
+
+- Added the `gain` parameter to `SparseSynapses`, scaling excitatory weights
+  at construction. Calibrated `gain = 10.0` at `out_degree=100` reproduces the
+  dense baseline mean rate (9.70 Hz vs 9.76 Hz).
+- Documented the fan-in dependence of mean firing rate (balanced-network
+  theory, van Vreeswijk & Sompolinsky 1998) in `docs/ARCHITECTURE.md`.
+- Added `docs/M1_5_RESULTS.md` recording the gain sweep and the dense N=10k
+  saturation event ("dense fan-in scaling trap", first recorded pathology).
