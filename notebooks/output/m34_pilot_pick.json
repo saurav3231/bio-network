@@ -1,0 +1,7 @@
+{
+  "scale": 0.6,
+  "ambient": 2.0,
+  "reason": "rate 1.69 Hz (the only lever setting hitting the [1,4] band) with 946 active, but accuracy 10.5% is 27.0% below the best pilot 37.5% -- acceptance will document the tradeoff",
+  "cell_rate_hz": 1.69152,
+  "cell_active": 946
+}

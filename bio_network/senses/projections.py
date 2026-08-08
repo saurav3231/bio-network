@@ -72,6 +72,11 @@ class InputProjection:
             learnable ``w_in`` input synapses driven by STDP during training.
         competition_gain: drive sharpening exponent on ``w_in`` (1.0 identity).
         synaptic_scaling: M3.3 per-window Turrigiano-style renormalization.
+        scaling_target: M3.4 dial -- the per-edge power target ``C`` that
+            ``sum(w_in) == n_in_per_neuron * C`` is pinned to after each
+            training window (default 0.30 keeps the M3.3 equilibrium; raising
+            it re-pins the pathway at higher drive). Ignored unless
+            ``synaptic_scaling`` is on.
         excitatory_only: structural constraint (M3.3) -- draw input targets
             exclusively from the excitatory population so no input synapses
             land on inhibitory neurons.
@@ -87,6 +92,7 @@ class InputProjection:
         plastic: bool = False,
         competition_gain: float = 1.0,
         synaptic_scaling: bool = False,
+        scaling_target: float = SCALING_TARGET_PER_EDGE,
         excitatory_only: bool = False,
     ) -> None:
         self.n_pixels = int(n_pixels)
@@ -99,6 +105,7 @@ class InputProjection:
         self.plastic = bool(plastic)
         self.competition_gain = float(competition_gain)
         self.synaptic_scaling = bool(synaptic_scaling)
+        self.scaling_target = float(scaling_target)
         self.excitatory_only = bool(excitatory_only)
 
         if self.n_excitatory > self.n_neurons:
@@ -261,14 +268,15 @@ class InputProjection:
 
         After every training image window, each neuron's incoming ``w_in``
         weights are rescaled multiplicatively so their sum equals
-        ``C = n_in_per_neuron * 0.30`` (``SCALING_TARGET_PER_EDGE``). Because
-        the STDP initials are uniform in [0.2, 0.4] (mean 0.30) this ``C`` is
-        exactly the neuron's initial total power: the homeostasis is neutral on
-        day one and afterwards only *reallocates* correlation structure within
-        a constant power budget. Winning pixels that drive causal spikes grow
-        their share; losing pixels are squeezed. Gated to the training phase
-        (``_learning`` must be on) and to ``plastic`` / ``synaptic_scaling``
-        arms only; assignment/test never rescale.
+        ``C = n_in_per_neuron * scaling_target``. With the default target 0.30
+        (``SCALING_TARGET_PER_EDGE``) this ``C`` is exactly the neuron's
+        initial total power (STDP initials uniform in [0.2, 0.4], mean 0.30):
+        the homeostasis is neutral on day one and afterwards only *reallocates*
+        correlation structure within a constant power budget. Raising the
+        target re-pins the budget at higher drive, so winning pixels not only
+        grow their share but the whole pathway's input power rises. Gated to
+        the training phase (``_learning`` must be on) and to ``plastic`` /
+        ``synaptic_scaling`` arms only; assignment/test never rescale.
         """
         if not self.plastic or not self.synaptic_scaling:
             return
@@ -280,7 +288,7 @@ class InputProjection:
 
         per_neuron = np.diff(self._in_offsets).astype(np.float64)
         sums = self._incoming_sums()
-        target = per_neuron * SCALING_TARGET_PER_EDGE
+        target = per_neuron * self.scaling_target
         # Fixed-point multiplicative renormalization that hits the per-neuron
         # sum target C while keeping every weight within [0, 1]: repeatedly
         # scale, then clamp, then rescale (a clipped edge drops out of the

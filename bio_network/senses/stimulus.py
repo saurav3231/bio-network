@@ -46,6 +46,7 @@ class RetinaStimulus:
         gap_ms: float = 150.0,
         pulse_amp: float = _PULSE_AMP,
         pulse_width_ms: float = _PULSE_WIDTH_MS,
+        ambient_drive: float = 0.0,
     ) -> None:
         """Wire a retina and projection to a batch of images.
 
@@ -58,12 +59,21 @@ class RetinaStimulus:
                 settle between presentations.
             pulse_amp: injected current on each driven neuron per pixel spike.
             pulse_width_ms: duration (ms) of each injected pulse.
+            ambient_drive: M3.4 dial -- constant tonic current applied to *every*
+                excitatory neuron during each image window, but only while
+                learning is on (the ``_learning`` training-phase gate). Measured
+                in "mV-equivalent Izhikevich step units": the engine update is
+                ``v += 0.5*((0.04v^2+5v+140-u)+I)``, so ``ambient_drive=1`` adds
+                a +0.5 mV push per ms, i.e. a modest wake-up blood current
+                rather than a spike-scale (20x) pulse. Off for frozen
+                assignment/test/probe phases by the training-only gate.
         """
         self.retina = retina
         self.projection = projection
         self.gap_ms = float(gap_ms)
         self.pulse_amp = float(pulse_amp)
         self.pulse_width_ms = float(pulse_width_ms)
+        self.ambient_drive = float(ambient_drive)
         self.slot_ms = retina.window_ms + self.gap_ms
         self._learning = False
 
@@ -108,16 +118,25 @@ class RetinaStimulus:
         if not (0 <= rel < self.retina.window_ms):
             return np.zeros((n_neurons,))
 
+        # M3.4: constant tonic "morning-coffee" drive over the image window, on
+        # all excitatory neurons, but ONLY during the training phase (learning
+        # gate). Frozen assessment (assignment/test, probe) never gets it, so
+        # wakefulness is measured on the real image drive alone.
+        current = np.zeros((n_neurons,))
+        if self._learning and self.ambient_drive:
+            n_exc = min(self.projection.n_excitatory, n_neurons)
+            current[:n_exc] += self.ambient_drive
+
         table = self.timetables[slot]
         if table.size == 0:
-            return np.zeros((n_neurons,))
+            return current
 
         # Spikes active at this millisecond (a spike at `tt` injects a pulse in
         # ``[tt, tt+pulse_width_ms)``).
         tt = table[:, 0]
         active = (tt <= rel) & (tt > rel - self.pulse_width_ms)
         if not active.any():
-            return np.zeros((n_neurons,))
+            return current
 
         # M3.2: a spike *starts* its pulse at ``rel`` only on the single
         # rounded time of the spike itself; that is the arrival instant for
@@ -130,6 +149,5 @@ class RetinaStimulus:
         neurons = self.projection.drive_neurons(pixels)
         weights = self.projection.drive_weights(pixels)
 
-        current = np.zeros((n_neurons,))
         np.add.at(current, neurons, self.pulse_amp * weights)
         return current

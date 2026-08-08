@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (M3.4: "morning coffee" -- bounded wakefulness tuning)
+
+- `InputProjection` makes the synaptic-scaling per-edge target **configurable**
+  (`scaling_target`, default 0.30 = the M3.3 line) in
+  `bio_network/senses/projections.py`. L1 dial: raising `C` re-pins
+  `sum(w_in) == n_in_per_neuron * C` after each training window, monotonically
+  raising the input drive (weights still clipped to `[0, 1]`, so very high `C`
+  may stop marginally under target when winners saturate).
+- `RetinaStimulus` gains **ambient drive** (`ambient_drive`, default 0.0) in
+  `bio_network/senses/stimulus.py`: a constant tonic current, in
+  mV-equivalent Izhikevich-step units, added to every excitatory neuron during
+  each image window and only while learning is on (training-gated; gap and
+  frozen phases silent). Together these L1 (`scaling_target`) and L2
+  (ambient drive) knobs are the M3.4 wakefulness dials.
+- `tests/test_morning_coffee.py`: 9 tests (ambient window/phase/units guards,
+  scaling-target default + configurable C, per-lever determinism in seed,
+  short ARM-C integration finite and reproducible).
+- `benchmarks/m34_morning_coffee.py`: three-step bounded protocol -- Step 1
+  instrumented ARM-B replay (theta histogram + per-neuron drive) for the
+  diagnosis, Step 2 a 3x2 pilot sweep (200-train: C x {0.30, 0.60, 1.00} x
+  ambient {0.0, 1.0, 2.0}) with per-cell npz caches + `m34_pilot.png`, Step 3
+  ONE full-scale ARM C (train 1000 / test 200 / probe 60 / seed 42) on the
+  picked config, ARM A/B loaded from the M3.3 caches, plus `m34_tiles_armC.png`
+  and `m34_ladder.png`.
+- `docs/M3_4_RESULTS.md` and a "Wakefulness dials" note in ARCHITECTURE.
+
+**Result:** the diagnosis is drive-bound, not threshold-bound -- after ARM B
+training 100% of excitatory thetas sit at the 1.0 floor (excitation cost
+already minimal) while w_in is everywhere supplied (0% zero, mean 5.87), so the
+sleep is a per-ms current-strength problem. The two levers wake the network:
+full-scale ARM C ends at 1.31 Hz and 805/1000 active vs 0.17 Hz / 342 for
+ARM B. But accuracy drops from 39% to 13.5% -- the coffee over-drives the
+pathway past its class-selective operating point. Per the acceptance policy
+(health met, accuracy missed) ARM C is kept and the tradeoff documented; M3.4 is a
+partial positive that proves wakefulness is a lever, not a missing feature.
+
 ## [0.1.0] - 2026-08-08
 
 ### Added (M3.2: plastic input projection / optic-nerve STDP)

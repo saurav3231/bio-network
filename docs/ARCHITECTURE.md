@@ -264,11 +264,16 @@ A- 0.12; Song-Miller-Abbott bounds) -- the firing-side LTP runs through an
   - *Synaptic scaling* (`synaptic_scaling=True`, Turrigiano et al. 1998). After
     every training image window ``RetinaStimulus`` calls
     ``InputProjection.synaptic_scale()``, a fixed-point loop that renormalizes
-    each neuron's incoming weights so ``sum(w_in) == n_in_per_neuron * 0.30``
-    (the STDP init mean, so day-one total power is preserved and Scaling only
-    reallocates correlation structure within a constant budget). The loop keeps
-    every weight within ``[0, 1]`` by scale-then-clamp-then-rescale until the
-    target is hit to 1e-9 (clamping to the writer-pinned bound). Scaling is
+    each neuron's incoming weights so ``sum(w_in) == n_in_per_neuron * C`` where
+    the per-edge target ``C`` defaults to 0.30 (``scaling_target=0.30`` on
+    ``InputProjection``) -- the STDP init mean, so day-one total power is
+    preserved and Scaling only reallocates correlation structure within a
+    constant budget. **M3.4 dial**: ``scaling_target`` is configurable, so
+    raising ``C`` re-pins the whole pathway's power budget at higher drive
+    (it is both the wakefulness and the selectivity lever). The loop keeps every
+    weight within ``[0, 1]`` by scale-then-clamp-then-rescale until the target
+    is hit to 1e-9 (clamping to the writer-pinned bound; for ``C`` high enough
+    that saturation is unreachable the sum stops just under ``C``). Scaling is
     gated to the training phase only (`_learning`), exactly like STDP.
   - *Adaptive spike thresholds* (`adaptive_thresholds=True` on
     ``IzhikevichPopulation``, Diehl & Cook 2015 intrinsic plasticity). Each
@@ -283,6 +288,22 @@ A- 0.12; Song-Miller-Abbott bounds) -- the firing-side LTP runs through an
   - *Structural constraint* (`excitatory_only=True`): the fan-out draws input
     targets exclusively from the excitatory population so no input synapse
     lands on an inhibitory interneuron.
+  - *Wakefulness dials (M3.4, parameter-only)*. A bounded experiment shipped two
+    tuning knobs on top of the untouched M3.3 machinery -- no architecture
+    redesign:
+    - **L1 ``scaling_target=C``** (`InputProjection`, above): re-pins the
+      per-edge power budget to a higher/lower constant.
+      passing. Higher ``C`` monotonically raises drive and firing.
+    - **L2 ambient drive** (`RetinaStimulus(ambient_drive=...)`): a constant
+      tonic current, measured in mV-equivalent Izhikevich-step units, added to
+      *every* excitatory neuron during each image window. It is gated by the
+      same ``_learning`` training-phase flag and only runs inside the window
+      (gap silent, frozen phases silent), so it is a training-time morning
+      coffee, not an inference stimulant. Together L1+L2 are the two levers of
+      the M3.4 pilot sweep. Result (see ``docs/M3_4_RESULTS.md``): they wake
+      the network -- ARM C ends at 1.31 Hz and 805/1000 active -- but
+      over-drive past the class-selective operating point (13.5% vs 39%),
+      a documented health-versus-selectivity tradeoff.
 - **`stimulus.py` -- `RetinaStimulus`**: a drop-in `stimulus_fn` for
   `simulate(...)`. Each image owns a time slot of `window_ms + gap_ms`; within
   the window it emits current pulses to the pixels' target neurons (scaled by
@@ -305,9 +326,9 @@ Two honesty rules are structural: plasticity is **phase-gated** (input and
 recurrent STDP are on only during training; both parents freeze before
 assignment and test) and **labels never touch the recurrent weights** -- M3 is
 "unsupervised feature emergence," not supervised tuning. Results are recorded
-in `docs/M3_RESULTS.md`, `docs/M3_2_RESULTS.md` and `docs/M3_3_RESULTS.md`; the
-running notebooks are `notebooks/m3_first_light.ipynb`,
-`notebooks/m32_plastic_optic_nerve.ipynb` and
+in `docs/M3_RESULTS.md`, `docs/M3_2_RESULTS.md`, `docs/M3_3_RESULTS.md` and
+`docs/M3_4_RESULTS.md`; the running notebooks are `notebooks/m3_first_light.ipynb`,
+`notebooks/m32_plastic_optic_nerve.ipynb`,
 `notebooks/m33_critical_period.ipynb`.
 
 References:
