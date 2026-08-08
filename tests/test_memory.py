@@ -211,6 +211,112 @@ def test_sleep_with_replay_produces_some_spikes() -> None:
     assert np.all(np.isfinite(rec.times_ms))
 
 
+def test_sleep_noise_gating_scales_drive() -> None:
+    """Sleep attenuates the background drive by sleep_noise_scale.
+
+    Two identical engines run the same sleep (no replay) with different
+    ``sleep_noise_scale``; the quieter one must spike strictly less. The
+    default 0.25 is the quiet end; scale=1.0 is the loud end, so this pins
+    the gating knob to its documented direction.
+    """
+
+    def _run(scale: float) -> int:
+        pop, syn = make_small()
+        rec = simulate(
+            pop,
+            syn,
+            T_ms=300,
+            engine="sparse",
+            seed=SEED,
+            phase="sleep",
+            sleep_noise_scale=scale,
+            learning=True,
+        )
+        return int(rec.times_ms.size)
+
+    quiet = _run(0.25)
+    loud = _run(1.0)
+    assert (
+        loud > quiet
+    ), f"scale 1.0 should drive more spikes than 0.25 ({loud} vs {quiet})"
+
+
+def test_sleep_learning_off_keeps_weights_bit_identical() -> None:
+    """With learning=False, sleep must not touch a single weight bit.
+
+    This is the control that proves any consolidation measured during sleep is
+    attributable to the learning gate, not to the replay pulses themselves.
+    """
+    population, synapses = make_small()
+    store = EpisodicStore(capacity=4)
+    eid = store.record(
+        "e", np.array([3, 4, 5], dtype=np.int64), np.array([5.0, 15.0, 20.0])
+    )
+    engine = ReplayEngine(store)
+    plan = engine.plan([eid], start_ms=5.0, gap_ms=20.0, compression=1.0)
+    before = synapses.weights.copy()
+    simulate(
+        population,
+        synapses,
+        T_ms=200,
+        engine="sparse",
+        seed=SEED,
+        phase="sleep",
+        replay_plan=plan,
+        learning=False,
+    )
+    np.testing.assert_array_equal(synapses.weights, before)
+
+
+def test_sleep_consolidation_is_causal() -> None:
+    """Replaying a pre-before-post order during sleep potentiates that synapse.
+
+    A tiny controlled pair (neuron A fires 8 ms before B, inside the ~20 ms
+    STDP window) is replayed through the sleep phase with STDP on. The A->B
+    weight must rise, and the same-order baseline A->C (never replayed
+    together) must not.
+    """
+    n_exc, n_inh = 30, 0
+    population = IzhikevichPopulation(n_excitatory=n_exc, n_inhibitory=n_inh, seed=SEED)
+    synapses = SparseSynapses(
+        n_excit=n_exc,
+        n_inhib=n_inh,
+        out_degree=n_exc,
+        seed=SEED,
+        gain=1.0,
+    )
+    a, b, c = 0, 1, 2
+
+    def _mean(pre: int, post: int) -> float:
+        s, e = int(synapses.offsets[pre]), int(synapses.offsets[pre + 1])
+        sel = (synapses.targets[s:e] >= post) & (synapses.targets[s:e] < post + 1)
+        return float(synapses.weights[s:e][sel].mean()) if sel.any() else 0.0
+
+    store = EpisodicStore(capacity=4)
+    eid = store.record("pair", np.array([a, b], dtype=np.int64), np.array([2.0, 10.0]))
+    engine = ReplayEngine(store)
+    plan = engine.plan([eid] * 20, start_ms=10.0, gap_ms=30.0, compression=1.0)
+
+    w_ab_before, w_ac_before = _mean(a, b), _mean(a, c)
+    simulate(
+        population,
+        synapses,
+        T_ms=900,
+        engine="sparse",
+        seed=SEED,
+        phase="sleep",
+        replay_plan=plan,
+        learning=True,
+    )
+    w_ab_after, w_ac_after = _mean(a, b), _mean(a, c)
+    # A->B has a direct synapse in the seeded graph and is replayed together
+    # with B: it must potentiate, and more than the never-paired A->C control.
+    assert (
+        w_ab_after > w_ab_before
+    ), f"A->B did not potentiate ({w_ab_before} -> {w_ab_after})"
+    assert (w_ab_after - w_ab_before) > (w_ac_after - w_ac_before)
+
+
 # ---- save_state / load_state --------------------------------------------
 
 

@@ -252,7 +252,7 @@ def run_arm(replay_on):
     if replay_on:
         plan2 = replay.plan([eid_t1]*30, start_ms=0.0, gap_ms=100, compression=1.0)
     simulate(pop, syn, T_ms=SLEEP_MS, engine="sparse", phase="sleep",
-             replay_plan=plan2, learning=True, sleep_noise_scale=0.05)
+             replay_plan=plan2, learning=True, sleep_noise_scale=0.25)
     simulate(pop, syn, T_ms=T2_TRAIN_MS, engine="sparse", learning=True,
              stimulus_fn=pair_pulse_stim(GROUP_D, GROUP_E, lead=LEAD))   # T2
     return (exc_mean(syn, GROUP_A, GROUP_B) / exc_mean(syn, GROUP_A, GROUP_C),

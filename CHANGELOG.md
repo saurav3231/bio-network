@@ -96,8 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot-after-training).
 - M4 experiments (`benchmarks/m4_stdp_experiments.py`): E4a recall after sleep
   (post/pre 1.407 > 1.3), E4b continual learning (SLEEP vs NOSLEEP arm,
-  retention advantage 2.45x > 1.25).
+  retention advantage 2.485x > 1.25).
+- 15 M4 tests (`tests/test_memory.py`): store/replay round trips, sleep quiet
+  drive, replay-pulse injection, causal consolidation, and the sleep fork
+  guarantees -- `save_state/load_state` lockstep determinism, noise-gating
+  (scale 0.25 quieter), and `learning=False` during sleep leaving weights
+  bit-identical.
 - `docs/M4_RESULTS.md`, `docs/ARCHITECTURE.md` (episodic/sleep-replay section
-  with compressed-replay biology citations), ROADMAP M4 Complete,
+  with compressed-replay biology citations), ROADMAP M4 Complete (before M3),
   `notebooks/m4_sleep_consolidation.ipynb` (executed, with
-  `notebooks/output/m4_e4a_recall.png`, `m4_e4b_continual.png`).
+  `notebooks/output/m4_e4a_recall.png`, `m4_e4b_continual.png`,
+  `m4_protocol_rates.png`).
