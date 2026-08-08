@@ -36,18 +36,27 @@ reproduce known spiking regimes from Izhikevich 2003.
 ratio 1.72 > 1.5) in `docs/M2_RESULTS.md`. Cue/pattern completion (E3) was
 explored and honestly reported as absent under the current gain/layout.
 
-## M3 -- Sensory Encoding
+## M3 -- Sensory Encoding (Current)
 
 - Convert images to spike trains (`bio_network/encoding/`).
 - Unsupervised pattern recognition: the network clusters or discriminates input
   classes from spike statistics alone.
 
-## M4 -- Memory + Sleep Phase
+## M4 -- Memory + Sleep Phase (Complete)
 
 - One-shot episodic store (`bio_network/memory/episodic.py`).
 - Offline replay of stored episodes (`bio_network/memory/replay.py`).
 - Sleep/consolidation loop that replays and strengthens recent memories while
-  protecting older ones.
+  learning new ones.
+
+**Exit criteria:** on the sparse engine with STDP, replaying a stored wake
+episode during sleep measurably strengthens the learned association, and
+learning a second association afterward does not erase the first.
+
+**Status:** Complete. 45 tests pass. Sleep replay of the P1 melody lifts
+recall after a cue (E4a, post/pre 1.407 > 1.3) in `docs/M4_RESULTS.md`, and
+the replay arm retains T1 after learning T2 (E4b, retention advantage 2.45x >
+1.25) while both arms acquire T2 equally. See `notebooks/m4_sleep_consolidation.ipynb`.
 
 ## M5 -- Neuromodulation
 

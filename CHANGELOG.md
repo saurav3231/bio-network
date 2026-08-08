@@ -79,3 +79,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/M2_RESULTS.md` and `notebooks/m2_fire_together.ipynb` (with executed
   outputs) and `notebooks/output/m2_hallmark.png`. STDP documented in
   `docs/ARCHITECTURE.md`; M2 marked Complete in `ROADMAP.md`.
+
+### Added (M4: episodic memory + sleep replay)
+
+- `EpisodicStore` (`bio_network/memory/episodic.py`): bounded, FIFO one-shot
+  verbatim spike-pattern memory with exact round trip, time-sorted listing,
+  and eviction.
+- `ReplayEngine` (`bio_network/memory/replay.py`): turns episodes into
+  `(time_ms, neuron_id)` replay timetables with optional time compression and
+  multi-copy sleep-phase plans.
+- Sleep phase in `scheduler.simulate`: `phase="sleep"` attenuates background
+  drive (`sleep_noise_scale`), injects replay pulses, leaves STDP ON, and
+  rejects the dense engine (sparse-only).
+- `SparseSynapses.save_state/load_state` and `IzhikevichPopulation.save_state/
+  load_state` for bit-identical checkpoint / restore (two-armed experiments,
+  snapshot-after-training).
+- M4 experiments (`benchmarks/m4_stdp_experiments.py`): E4a recall after sleep
+  (post/pre 1.407 > 1.3), E4b continual learning (SLEEP vs NOSLEEP arm,
+  retention advantage 2.45x > 1.25).
+- `docs/M4_RESULTS.md`, `docs/ARCHITECTURE.md` (episodic/sleep-replay section
+  with compressed-replay biology citations), ROADMAP M4 Complete,
+  `notebooks/m4_sleep_consolidation.ipynb` (executed, with
+  `notebooks/output/m4_e4a_recall.png`, `m4_e4b_continual.png`).

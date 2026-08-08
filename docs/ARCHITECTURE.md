@@ -1,9 +1,11 @@
 # Architecture
 
-This document maps each brain mechanism from the README to a planned software
-module. Everything here is a plan; Milestone 1 is the only code that exists so
-far. The layout is deliberately small so each mechanism can be studied,
-benchmarked, and swapped independently.
+This document maps each brain mechanism from the README to a software module.
+Milestones M1 through M4 are built: the dense and sparse engines, STDP
+learning, and the episodic/sleep-replay memory loop all exist in `bio_network/`.
+Sensory encoding (M3) and neuromodulation (M5) remain planned. The layout is
+deliberately small so each mechanism can be studied, benchmarked, and swapped
+independently.
 
 ```
 +----------+     +---------+     +------------------+     +-----------+
@@ -155,10 +157,68 @@ References:
 
 ### `bio_network/memory/` -- episodic store and replay
 
-Fast one-shot memory. The episodic store (`episodic.py`) records spike events
-and network states during "wake" phases. The replay module (`replay.py`) plays
-stored episodes back during a simulated "sleep" phase, giving the network a
-chance to consolidate memories offline, in line with Rasch & Born 2013.
+Fast one-shot memory, realized in M4. The episodic store (`episodic.py`)
+records spike events and network states during "wake" phases. The replay
+module (`replay.py`) plays stored episodes back during a simulated "sleep"
+phase, giving the network a chance to consolidate memories offline.
+
+### Episodic store and replay (M4)
+
+Two modules, both deliberately small and honest about what they model:
+
+- **`EpisodicStore`** (`episodic.py`) is a bounded, FIFO one-shot memory. An
+  episode is a verbatim spike pattern -- `(tag, neuron_ids, rel_times_ms)` --
+  with no learned compression. `record()` accepts a spike burst; `get()` returns
+  it unchanged (round trip is exact); `all()` lists stored episodes. Sorted by
+  time on replay. Capacity is a constructor parameter with FIFO eviction of the
+  oldest episode (an unreplayed memory's natural fate).
+- **`ReplayEngine`** (`replay.py`) turns an episode into a `(time_ms,
+  neuron_id)` replay timetable. `schedule(episode_id, start_ms,
+  compression=1.0)` shifts the episode in time and optionally time-compresses it;
+  `plan(episode_ids, start_ms, gap_ms, compression)` loops many episode copies
+  into a single timetable -- the sleep-phase "replay sequence".
+
+The scheduler gained a real **sleep phase** (`simulate(..., phase="sleep",
+replay_plan=..., sleep_noise_scale=0.25)`): external background drive is
+attenuated by `sleep_noise_scale`, replay pulses are injected as current onto
+the implicated neurons, and STDP stays ON so the replayed pattern is
+consolidated into the *same* recurrent weights used during wake. The dense
+engine does not implement sleep and rejects `phase="sleep"` with a ValueError;
+only the sparse event-driven engine (the one with STDP) supports it.
+
+**Compressed replay is the biological anchor.** Hippocampal replay in slow-wave
+sleep runs 5-20x faster than the original experience (Wilson & McNaughton 1994;
+Diba & Buzsaki 2007). The `compression` parameter is the faithful knob: M4
+runs at `compression=1.0` (untimed replay) to keep the consolidation mechanism
+itself the experimental variable, but the engine and the replay timetable both
+support compressed replay.
+
+**Why replay stays in the same weights.** M4 does not implement a separate
+hippocampus-to-cortex weight copy (two-pathway consolidation such as Rasch &
+Born 2013). Instead, sleep replay drives the *same* plastic excitatory synapses
+that learned during wake. This is the simplest mechanism that turns the wake
+episode into relaunch quantum: replay re-runs the pattern under the same STDP
+rule, and the replayed spike timing structurally strengthen the same
+association. The `episodic.py`/`replay.py` split is kept so a separate
+consolidation path can be added later without touching the engine.
+
+**`simulate` also exposes `save_state()` / `load_state()`** on
+`IzhikevichPopulation` (v, u) and `SparseSynapses` (weights, spike queue,
+learning ledger, sorted spike times, traces, and arrival ledger), in part for
+the M4 continual-learning experiment, which needs to start two arms from the
+identical post-training state.
+
+Experiment results are recorded in `docs/M4_RESULTS.md`; the running notebook
+is `notebooks/m4_sleep_consolidation.ipynb`.
+
+References:
+
+- Wilson, M. A., & McNaughton, B. L. (1994). Reactivation of hippocampal
+  ensemble memories during sleep. *Science*, 265(5172), 676--679.
+- Diba, K., & Buzsaki, G. (2007). Forward and reverse hippocampal place-cell
+  sequences during ripples. *Nature Neuroscience*, 10(10), 1241--1242.
+- Rasch, B., & Born, J. (2013). About sleep's role in memory. *Physiological
+  Reviews*, 93(2), 681--766.
 
 ### `bio_network/modulation/` -- neuromodulation
 

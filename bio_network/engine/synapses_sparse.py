@@ -163,8 +163,11 @@ class SparseSynapses:
         self._tau_minus = float(tau_minus)
         self._learning_enabled = True
 
-        if self._syn_trace is not None:
-            return
+        if self._syn_trace is None:
+            self._allocate_plasticity()
+
+    def _allocate_plasticity(self) -> None:
+        """Allocate the STDP trace/arrival state (idempotent helper)."""
         n_syn = self._n_synapses
         n_neurons = self.n_neurons
         self._syn_trace = np.zeros(n_syn, dtype=np.float64)
@@ -187,6 +190,71 @@ class SparseSynapses:
             start = int(self._in_offsets[j])
             flat[start : start + len(bucket)] = bucket
         self._in_syn = flat
+
+    # -- state snapshot / restore -----------------------------------------
+    def save_state(self) -> dict:
+        """Return a deep copy of every mutable quantity needed to resume.
+
+        Captures the plastic weights, the axonal-delay ring buffer, the STDP
+        traces (if learning was enabled) and the arrival ledger. The static
+        graph (``targets``/``delays``/``offsets``) never changes after
+        construction, so it is not copied. Used to fork two experimental arms
+        from an identical network state (see E4b in the M4 benchmark).
+
+        Returns:
+            A dict that can be passed back to :meth:`load_state`.
+        """
+        state = {
+            "weights": self.weights.copy(),
+            "_queue": self._queue.copy(),
+            "_learning_enabled": self._learning_enabled,
+            "_a_plus": self._a_plus,
+            "_a_minus": self._a_minus,
+            "_tau_plus": self._tau_plus,
+            "_tau_minus": self._tau_minus,
+        }
+        if self._syn_trace is not None:
+            state["_syn_trace"] = self._syn_trace.copy()
+            state["_syn_last"] = self._syn_last.copy()
+            state["_post_trace"] = self._post_trace.copy()
+            state["_post_last"] = self._post_last.copy()
+            state["_arrivals"] = [
+                [arr.copy() for arr in bucket] for bucket in self._arrivals
+            ]
+            state["_in_syn"] = self._in_syn.copy()
+            state["_in_offsets"] = self._in_offsets.copy()
+        return state
+
+    def load_state(self, state: dict) -> None:
+        """Restore every mutable quantity captured by :meth:`save_state`.
+
+        The network graph (``targets``/``delays``/``offsets``) is *not*
+        touched, so the state must come from a synapses object with the same
+        topology (e.g. built from the same seed). After loading, the engine
+        produces bit-identical future spikes to the arm that saved it.
+
+        Args:
+            state: the dict returned by :meth:`save_state`.
+        """
+        self.weights[...] = state["weights"]
+        self._queue[...] = state["_queue"]
+        self._learning_enabled = state["_learning_enabled"]
+        self._a_plus = state["_a_plus"]
+        self._a_minus = state["_a_minus"]
+        self._tau_plus = state["_tau_plus"]
+        self._tau_minus = state["_tau_minus"]
+        if "_syn_trace" in state:
+            if self._syn_trace is None:
+                self._allocate_plasticity()
+            self._syn_trace[...] = state["_syn_trace"]
+            self._syn_last[...] = state["_syn_last"]
+            self._post_trace[...] = state["_post_trace"]
+            self._post_last[...] = state["_post_last"]
+            self._arrivals = [
+                [arr.copy() for arr in bucket] for bucket in state["_arrivals"]
+            ]
+            self._in_syn[...] = state["_in_syn"]
+            self._in_offsets[...] = state["_in_offsets"]
 
     # -- public graph size ------------------------------------------------
     @property

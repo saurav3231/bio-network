@@ -62,6 +62,9 @@ def simulate(
     engine: str = "dense",
     learning: bool = False,
     freeze_at_ms: float | None = None,
+    phase: str = "wake",
+    replay_plan: list[np.ndarray] | None = None,
+    sleep_noise_scale: float = 0.25,
 ) -> SpikeRecording:
     """Run the network for ``T_ms`` milliseconds.
 
@@ -87,6 +90,19 @@ def simulate(
             simulated time (milliseconds). This "freeze" is used to switch
             from a training phase to a frozen test phase. Spikes continue to
             propagate; only the weight updates stop.
+        phase: ``"wake"`` (default, identical to M2 behaviour) or ``"sleep"``
+            (M4). During sleep the external stimulus is attenuated by
+            ``sleep_noise_scale``, any ``replay_plan`` timetables are injected
+            as strong brief current pulses, and STDP stays ON so replayed
+            episodes consolidate into the weights (consolidation is
+            re-learning). Only the sparse engine supports sleep; the dense
+            engine ignores it.
+        replay_plan: for ``phase="sleep"``, a list of ``(time_ms, neuron_id)``
+            timetable arrays (as produced by ``ReplayEngine.schedule/plan``).
+            Each entry becomes a strong current pulse to that neuron at that
+            time, activating it without ever touching the weights directly.
+        sleep_noise_scale: multiplicative attenuation applied to the stimulus
+            during ``phase="sleep"`` (default 0.25: quiet, replay-dominated).
 
     Returns:
         A ``SpikeRecording`` of all spikes. Synaptic current from spikes at
@@ -103,6 +119,22 @@ def simulate(
     n_neurons = population.v.size
     n_excitatory = population.n_excitatory
     steps = round(T_ms)
+
+    if phase == "sleep" and engine != "sparse":
+        raise ValueError("phase='sleep' is only supported by engine='sparse'")
+
+    # Pre-bucket the replay plan by integer millisecond so each step can query
+    # it in O(1). Replay timetables are lists of (time_ms, neuron_id) rows.
+    replay_at: dict[int, list[int]] = {}
+    if replay_plan is not None and phase == "sleep":
+        for table in replay_plan:
+            table = np.asarray(table, dtype=float)
+            if table.size == 0:
+                continue
+            times = np.rint(table[:, 0]).astype(np.int64)
+            neurons = table[:, 1].astype(np.int64)
+            for tt, nid in zip(times, neurons):
+                replay_at.setdefault(int(tt), []).append(int(nid))
 
     times_list: list[float] = []
     indices_list: list[int] = []
@@ -127,6 +159,13 @@ def simulate(
                 current[n_excitatory:] = 2.0 * rng.standard_normal(
                     n_neurons - n_excitatory
                 )
+            if phase == "sleep":
+                current *= sleep_noise_scale
+                pulses = replay_at.get(t)
+                if pulses:
+                    # Strong brief current pulse: enough to reliably fire the
+                    # neuron but not to seize the whole network by itself.
+                    current[np.asarray(pulses, dtype=np.int64)] += 20.0
             current = current + synapses.currents(t, learn=learn_now)
 
             fired = population.step(current)

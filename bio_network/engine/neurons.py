@@ -66,6 +66,18 @@ class IzhikevichPopulation:
         self.v = -65.0 * np.ones(n_neurons)
         self.u = 0.2 * self.v
 
+    def save_state(self) -> dict:
+        """Deep copy of the dynamic state (``v``, ``u``) needed to resume."""
+        return {
+            "v": self.v.copy(),
+            "u": self.u.copy(),
+        }
+
+    def load_state(self, state: dict) -> None:
+        """Restore the state captured by :meth:`save_state` in place."""
+        self.v = state["v"].copy()
+        self.u = state["u"].copy()
+
     def step(self, I: np.ndarray) -> np.ndarray:
         """Advance the population by 1 ms and return the neurons that spiked.
 
