@@ -52,22 +52,6 @@ recall after a cue (E4a, post/pre 1.407 > 1.3) in `docs/M4_RESULTS.md`, and
 the replay arm retains T1 after learning T2 (E4b, retention advantage 2.49x >
 1.25) while both arms acquire T2 equally. See `notebooks/m4_sleep_consolidation.ipynb`.
 
-## M4 -- Memory + Sleep Phase (Complete)
-
-- One-shot episodic store (`bio_network/memory/episodic.py`).
-- Offline replay of stored episodes (`bio_network/memory/replay.py`).
-- Sleep/consolidation loop that replays and strengthens recent memories while
-  learning new ones.
-
-**Exit criteria:** on the sparse engine with STDP, replaying a stored wake
-episode during sleep measurably strengthens the learned association, and
-learning a second association afterward does not erase the first.
-
-**Status:** Complete. 48 tests pass. Sleep replay of the P1 melody lifts
-recall after a cue (E4a, post/pre 1.407 > 1.3) in `docs/M4_RESULTS.md`, and
-the replay arm retains T1 after learning T2 (E4b, retention advantage 2.49x >
-1.25) while both arms acquire T2 equally. See `notebooks/m4_sleep_consolidation.ipynb`.
-
 ## M3 -- Sensory Encoding (Complete)
 
 - Convert images to spike trains (`bio_network/senses/`: `Retina` encoder,
@@ -83,6 +67,21 @@ label-scoped readout decodes held-out digits at 0.20 vs chance 0.10 and kNN
 intentionally non-plastic; a learned input weight matrix (Diehl & Cook 2015;
 Masquelier & Thorpe 2007) is the planned v2 upgrade. See
 `notebooks/m3_first_light.ipynb`.
+
+### M3.2 -- Plastic Input Projection ("optic nerve") (Complete, honest negative)
+
+Make the 784 -> neuron input cable learnable (`w_in` STDP, tau 20 ms,
+A+ 0.10, A- 0.12, init uniform 0.2-0.4, plastic path only during training,
+frozen at assignment/test) and test causally whether input plasticity creates
+receptive fields and better recognition.
+
+**Status:** Complete as a *controlled marginal/negative result*: plastic drive
+moves held-out accuracy 11% -> 15% soft / 10% -> 16% vote against the identical
+frozen control, but contextualized honestly -- with A- 0.12 applied on every
+arrival vs A+ 0.10 requiring an actual spike, the plastic arm starves the
+population (45k vs 2.6 M train spikes, 0.09 vs 5.24 Hz) and forms no localized
+tiles. See `docs/M3_2_RESULTS.md` and `notebooks/m32_plastic_optic_nerve.ipynb`.
+A balanced homeostatic update rule is the documented follow-up.
 
 ## M5 -- Neuromodulation
 

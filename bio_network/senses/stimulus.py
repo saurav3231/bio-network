@@ -7,6 +7,11 @@ routes their spikes through an ``InputProjection``, and presents them one after
 another: each image fills one ``window_ms + gap_ms`` slot. Spikes inside the
 window become brief strong current pulses on the projected neurons; the gap is
 silent so the network's spiking between presentations can settle.
+
+When the projection is plastic (M3.2), the pulse amplitude is scaled by each
+edge's ``w_in`` and the projection's arrival-side STDP is triggered on the exact
+arrival of each pixel spike; the firing-side half is driven by the scheduler's
+``input_plastic_fn`` callback (see ``scheduler.simulate``).
 """
 
 from __future__ import annotations
@@ -21,11 +26,16 @@ _PULSE_WIDTH_MS = 3.0
 
 
 class RetinaStimulus:
-    """Present a list of images through a retina + fixed projection.
+    """Present a list of images through a retina + input projection.
 
     The object is a drop-in ``stimulus_fn`` for ``scheduler.simulate``. It is
     deterministic end to end: the retina timeline, projection, and pulse
     schedule all derive from fixed seeds.
+
+    The ``projection`` may be plastic (M3.2). In that case the per-edge input
+    weight ``w_in`` scales the pulse and, when learning is active (set by
+    ``set_learning``), each pixel spike triggers arrival-side STDP on the exact
+    millisecond it lands.
     """
 
     def __init__(
@@ -41,7 +51,7 @@ class RetinaStimulus:
 
         Args:
             retina: image encoder defining ``window_ms`` and spike timings.
-            projection: fixed non-plastic pixel -> neuron fan-out.
+            projection: pixel -> neuron fan-out (fixed or plastic).
             images: list of ``(H, W)`` float arrays (all standardized to the
                 retina's ``image_shape``).
             gap_ms: silent interval after each image window, so the network can
@@ -55,8 +65,15 @@ class RetinaStimulus:
         self.pulse_amp = float(pulse_amp)
         self.pulse_width_ms = float(pulse_width_ms)
         self.slot_ms = retina.window_ms + self.gap_ms
+        self._learning = False
 
         self.timetables = [retina.encode(np.asarray(img)) for img in images]
+
+    # -- learning toggle (M3.2) --------------------------------------------
+    def set_learning(self, active: bool) -> None:
+        """Enable/disable input-projection STDP (training phase only)."""
+        self._learning = bool(active)
+        self.projection.set_learning(active)
 
     # -- scheduling ------------------------------------------------------ --
     def __len__(self) -> int:
@@ -72,9 +89,11 @@ class RetinaStimulus:
         """Return the input-current vector at simulated time ``t``.
 
         The current is all-zero except during the ``pulse_width_ms`` following
-        each pixel-spike, where the pixel's fan-out neurons receive a strong
-        brief pulse. Because the drive is purely epoch-localized the network
-        only receives input while an image is being presented.
+        each pixel-spike, where the pixel's fan-out neurons receive a brief
+        pulse. Each pulse's amplitude is ``pulse_amp * w_in[edge]`` (with unit
+        weights for a frozen projection, so plastic=False reproduces v1).
+        Because the drive is purely epoch-localized the network only receives
+        input while an image is being presented.
         """
         t0 = int(t)
         slot = int(t0 // self.slot_ms)
@@ -89,16 +108,24 @@ class RetinaStimulus:
         if table.size == 0:
             return np.zeros((n_neurons,))
 
-        # Pulses active at this millisecond: events whose spike time falls in
-        # [rel-pulse_width, rel] (a spike at `tt` cuts).
+        # Spikes active at this millisecond (a spike at `tt` injects a pulse in
+        # ``[tt, tt+pulse_width_ms)``).
         tt = table[:, 0]
         active = (tt <= rel) & (tt > rel - self.pulse_width_ms)
         if not active.any():
             return np.zeros((n_neurons,))
 
+        # M3.2: a spike *starts* its pulse at ``rel`` only on the single
+        # rounded time of the spike itself; that is the arrival instant for
+        # STDP (post-synaptic neuron causality is measured at this ms).
+        starts = np.round(tt).astype(np.int64) == rel
+        new_pixels = table[active & starts, 1].astype(np.int64)
+        self.projection.on_input_arrival(new_pixels, rel, self._learning)
+
         pixels = table[active, 1].astype(np.int64)
         neurons = self.projection.drive_neurons(pixels)
+        weights = self.projection.drive_weights(pixels)
 
         current = np.zeros((n_neurons,))
-        np.add.at(current, neurons, self.pulse_amp)
+        np.add.at(current, neurons, self.pulse_amp * weights)
         return current

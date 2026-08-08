@@ -65,6 +65,7 @@ def simulate(
     phase: str = "wake",
     replay_plan: list[np.ndarray] | None = None,
     sleep_noise_scale: float = 0.25,
+    input_plastic_fn: Callable[[np.ndarray, int, bool], None] | None = None,
 ) -> SpikeRecording:
     """Run the network for ``T_ms`` milliseconds.
 
@@ -103,6 +104,14 @@ def simulate(
             time, activating it without ever touching the weights directly.
         sleep_noise_scale: multiplicative attenuation applied to the stimulus
             during ``phase="sleep"`` (default 0.25: quiet, replay-dominated).
+        input_plastic_fn: optional M3.2 hook. When provided, it is called as
+            ``input_plastic_fn(fired, t, learn_now)`` after each spike in the
+            sparse engine ("fired" are the neuron indices that spiked at time
+            ``t``), so an external plastic input projection can apply its
+            firing-side STDP on the driven population. If the stimulus is a
+            ``RetinaStimulus`` with a plastic projection, its arrival-side STDP
+            is additionally switched on/off in step with ``learn_now``. Default
+            None leaves M1-M4 behaviour byte-identical.
 
     Returns:
         A ``SpikeRecording`` of all spikes. Synaptic current from spikes at
@@ -152,6 +161,8 @@ def simulate(
         for t in range(steps):
             learn_now = learn and (freeze_at_ms is None or t < freeze_at_ms)
             if stimulus_fn is not None:
+                if hasattr(stimulus_fn, "set_learning"):
+                    stimulus_fn.set_learning(learn_now)
                 current = np.asarray(stimulus_fn(float(t), n_neurons), dtype=float)
             else:
                 current = np.zeros(n_neurons)
@@ -174,6 +185,8 @@ def simulate(
                 indices_list.extend(int(i) for i in fired)
                 synapses.on_firing(fired, t, learn=learn_now)
                 synapses.deliver(fired, t, learn=learn_now)
+                if input_plastic_fn is not None:
+                    input_plastic_fn(fired, t, learn_now)
 
         return SpikeRecording(
             times_ms=np.asarray(times_list, dtype=float),

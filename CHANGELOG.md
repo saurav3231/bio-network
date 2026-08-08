@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (M3.2: plastic input projection / optic-nerve STDP)
+
+- `InputProjection` learns (`plastic=True`): per-channel input synapses
+  `w_in in [0, 1]` initialized uniform 0.2-0.4 (`bio_network/senses/projections.py`)
+  with M2-style arrival-time STDP (tau 20 ms, A+ 0.10, A- 0.12), arrival-side
+  LTD `on_input_arrival`, firing-side LTP `on_neurons_fired`, reverse
+  (incoming-edge) adjacency for O(fired x fan-in) LTP, `set_learning` gates for
+  the train/freeze boundary, and a per-neuron homeostatic power target that
+  matches the frozen arm's drive. `plastic=False` is byte-for-byte the frozen
+  v1 pathway (unit drive, motherboard `drive_weights` = ones).
+- `RetinaStimulus` scales pulses by `w_in` when plastic and triggers
+  arrival-side STDP at the exact ms of each pixel spike; `set_learning`
+  propagates the training-phase toggle
+  (`bio_network/senses/stimulus.py`).
+- `scheduler.simulate` gains an optional `input_plastic_fn(fired, t, learn_now)`
+  hook applied post-firing in the sparse engine (default None: M1-M4 behavior
+  bit-identical) and toggles `stimulus.set_learning` in lock-step
+  (`bio_network/engine/scheduler.py`).
+- `LabelsReadout.predict_vote` (`bio_network/senses/readout.py`): a frozen hard
+  plurality-vote decoder, pre-committed alongside the soft prototype readout --
+  both reported on both arms, no retroactive selection.
+- `tests/test_projection_plastic.py`: 9 tests (frozen-arm identity, single-pair
+  causal LTP / non-causal LTD, [0,1] bounds, structural edge integrity, frozen
+  phase no-op, same-seed trajectory determinism, end-to-end training health).
+- `benchmarks/m32_plastic_optic_nerve.py`: two-arm AB (frozen v1 control vs
+  plastic) with pre-committed readouts, structured-tile and selectivity
+  metrics, stability guards; saves `m32_tiles_control.png`,
+  `m32_tiles_plastic.png`, `m32_tiles_diptych.png`.
+- `docs/M3_2_RESULTS.md`: **honest negative / marginal result** -- input
+  plasticity alone (A+ < A- at the observed firing rate) starves the recurrent
+  engine (plastic 44,950 vs control 2.61 M train spikes; rate 0.09 vs 5.24 Hz),
+  `w_in` stays in [0, 0.4], no structured tiles formed; readout moves 11% to
+  15% soft / 10% to 16% vote. Follow-up (balanced updating / Euclidean
+  homeostasis) is required before a "learned receptive field" claim.
+
 ### Added (M3: senses -- retina encoder and visual feature emergence)
 
 - `Retina` (`bio_network/senses/retina.py`): deterministic image -> spike

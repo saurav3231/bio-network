@@ -244,28 +244,43 @@ timetables the sparse engine consumes. Four small modules:
   **rate** (a Poisson train at `intensity * max_rate_hz`). Determinism comes
   from an explicit `np.random.default_rng(seed)`; `encode()` is the only entry
   point.
-- **`projections.py` -- `InputProjection`**: a **frozen, non-plastic** random
-  fan-out from pixels to neurons. Each pixel connects to `fanout` distinct
-  target neurons; the `targets` array is generated once and never updated.
-  `drive_neurons(pixels)` maps a pixel list to the neurons a stimulus should
-  inject, and `fan_in_stats()` reports the per-neuron input fan-in.
+- **`projections.py` -- `InputProjection`**: by default a **frozen** random
+  fan-out from pixels to neurons: each pixel connects to `fanout` distinct
+  target neurons and the `targets` array is generated once and never updated
+  (`drive_neurons(pixels)` maps a pixel list to the neurons a stimulus should
+  inject; `fan_in_stats()` reports the per-neuron input fan-in). Since M3.2 the
+  projection may instead be **plastic** (`plastic=True`): it carries per-edge
+  input synapses `w_in in [0, 1]` (init uniform 0.2-0.4) that learn with the
+  same arrival-time STDP as the recurrent engine (tau 20 ms, A+ 0.10,
+  A- 0.12; Song-Miller-Abbott bounds) -- the firing-side LTP runs through an
+  incoming-edge reverse adjacency built once at construction, and a per-neuron
+  homeostatic target keeps each neuron's total input power equal to its fan-in
+  so the plastic arm's drive matches the frozen arm's. `set_learning()` gates
+  plasticity to the training phase; `drive_weights()` is a vector of ones when
+  frozen and the (homeostatically balanced) `w_in` when plastic.
 - **`stimulus.py` -- `RetinaStimulus`**: a drop-in `stimulus_fn` for
   `simulate(...)`. Each image owns a time slot of `window_ms + gap_ms`; within
-  the window it emits current pulses to the pixels' target neurons, and it is
-  silent during the gap. `slot_boundaries(slot)` returns the slot's [t0, t1)
+  the window it emits current pulses to the pixels' target neurons (scaled by
+  `drive_weights` when the projection is plastic), and it is silent during the
+  gap. `slot_boundaries(slot)` returns the slot's [t0, t1)
   and `__len__` the number of images, so post-hoc per-image spike counts are
-  exact (this is how response matrices are built).
+  exact (this is how response matrices are built). `set_learning()` propagates
+  the learning toggle so the arrival side of input STDP fires exactly on each
+  pixel spike's arrival millisecond.
 - **`readout.py` -- `LabelsReadout`**: the label-scoped decoder. `fit()` builds
   a per-class mean response fingerprint from the responses of the *training*
-  split only; `predict()` scores a trial with the frozen fingerprints. Labels
-  never touch the weights: the readout reads *responses*, and fitting happens
-  after learning is frozen.
+split only; `predict()` scores a trial with the frozen fingerprints. Labels
+  never predict the weights: the readout reads *responses*, and fitting happens
+  after learning is frozen. `predict_vote()` is the second pre-committed
+  decoder (hard per-neuron plurality vote over the frozen assignment), reported
+  alongside `predict()` in the M3.2 two-arm comparison.
 
-Two honesty rules are structural: the input projection has **no plasticity**
-(a fixed random fan-out in the Hubel-Wiesel tradition), and **labels never touch
-the recurrent weights** -- M3 is "unsupervised feature emergence," not
-supervised tuning. Results are recorded in `docs/M3_RESULTS.md`; the running
-notebook is `notebooks/m3_first_light.ipynb`.
+Two honesty rules are structural: plasticity is **phase-gated** (input and
+recurrent STDP are on only during training; both parents freeze before
+assignment and test) and **labels never touch the recurrent weights** -- M3 is
+"unsupervised feature emergence," not supervised tuning. Results are recorded
+in `docs/M3_RESULTS.md` and `docs/M3_2_RESULTS.md`; the running notebooks are
+`notebooks/m3_first_light.ipynb` and `notebooks/m32_plastic_optic_nerve.ipynb`.
 
 References:
 
