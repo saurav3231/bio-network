@@ -100,7 +100,11 @@ class RetinaStimulus:
         if slot >= len(self.timetables):
             return np.zeros(n_neurons)
 
+        # M3.3: at the start of each new slot the previous training window is
+        # over -- apply per-neuron synaptic scaling (Turrigiano) if on.
         rel = t0 - slot * self.slot_ms
+        if rel == 0 and slot > 0 and self._learning:
+            self.projection.synaptic_scale()
         if not (0 <= rel < self.retina.window_ms):
             return np.zeros((n_neurons,))
 

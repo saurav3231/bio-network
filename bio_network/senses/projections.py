@@ -19,6 +19,23 @@ receptive fields.
 
 With ``plastic=False`` the projection is byte-for-byte identical to the M3 v1
 class: no weight array, constant pulse drive, deterministic from the seed.
+
+M3.3 adds the second biological missing regulator observed in M3.2: **synaptic
+scaling** (Turrigiano et al. 1998). The M3.2 arm demonstrated that pure STDP
+without a thermostat starves the input pathway: LTD (A- 0.12, applied on every
+arrival) outruns LTP (A+ 0.10, which needs a neuron to actually spike), so
+``w_in`` drains toward zero and the population collapses to ~0.1 Hz. Synaptic
+scaling is the real neuron's answer -- a slow, multiplicative, per-neuron
+renormalization of the *post-synaptic* side: after each training image window
+each neuron's input-weight column is rescaled so its total is pinned to
+``C = n_in_per_neuron * 0.30``. The total input power a neuron can inject is
+now constant (no death spiral), while the *distribution* of that power across
+its winning/experimental inputs stays free: pixels that reliably drive causal
+spikes keep and grow their share; everything else is squeezed. This is the
+classic Turrigiano homeostasis: preserving total synaptic strength per neuron
+while letting correlation structure be re-allocated. It is gated to the
+training phase only (assignment/test leaves the weights untouched), and it is
+disabled with ``plastic=False`` (the frozen v1 pathway).
 """
 
 from __future__ import annotations
@@ -26,6 +43,13 @@ from __future__ import annotations
 import numpy as np
 
 _TRACE_NEVER = -1.0e18
+
+# Synaptic-scaling constant (Turrigiano et al. 1998 style): per-neuron input
+# weight sum is pinned to ``n_in_per_neuron * SCALING_TARGET_PER_EDGE``. With
+# STDP initials uniform in [0.2, 0.4] (mean 0.30) this is exactly the arm's
+# initial total power, so the homeostasis is *shape free*: only relative
+# sharing of that fixed power can change.
+SCALING_TARGET_PER_EDGE = 0.30
 
 
 class InputProjection:
@@ -39,37 +63,57 @@ class InputProjection:
     Args:
         n_pixels: number of retina channels (e.g. 784 for a 28x28).
         n_neurons: total recurrent population size (excitatory + inhibitory).
+        n_excitatory: size of the excitatory sub-population (default: same as
+            ``n_neurons``). Only used when ``excitatory_only`` is set.
         fanout: how many distinct random neurons each pixel drives.
         seed: random seed; a given seed always draws the same targets.
         plastic: when False (default) the projection is the frozen v1 pathway
             (constant unit drive, no weight state). When True it carries
             learnable ``w_in`` input synapses driven by STDP during training.
+        competition_gain: drive sharpening exponent on ``w_in`` (1.0 identity).
+        synaptic_scaling: M3.3 per-window Turrigiano-style renormalization.
+        excitatory_only: structural constraint (M3.3) -- draw input targets
+            exclusively from the excitatory population so no input synapses
+            land on inhibitory neurons.
     """
 
     def __init__(
         self,
         n_pixels: int,
         n_neurons: int,
+        n_excitatory: int | None = None,
         fanout: int = 20,
         seed: int = 42,
         plastic: bool = False,
         competition_gain: float = 1.0,
+        synaptic_scaling: bool = False,
+        excitatory_only: bool = False,
     ) -> None:
         self.n_pixels = int(n_pixels)
         self.n_neurons = int(n_neurons)
+        if n_excitatory is None:
+            n_excitatory = self.n_neurons
+        self.n_excitatory = int(n_excitatory)
         self.fanout = int(fanout)
         self.seed = seed
         self.plastic = bool(plastic)
         self.competition_gain = float(competition_gain)
+        self.synaptic_scaling = bool(synaptic_scaling)
+        self.excitatory_only = bool(excitatory_only)
 
-        if self.fanout > self.n_neurons:
-            raise ValueError("fanout cannot exceed n_neurons")
+        if self.n_excitatory > self.n_neurons:
+            raise ValueError("n_excitatory cannot exceed n_neurons")
+        pool = self.n_excitatory if self.excitatory_only else self.n_neurons
+        if self.fanout > pool:
+            raise ValueError("fanout cannot exceed the target pool size")
+        if self.excitatory_only and self.n_excitatory <= 0:
+            raise ValueError("excitatory_only=True requires n_excitatory >= 1")
 
         rng = np.random.default_rng(seed)
         # Each pixel channel targets a distinct set of `fanout` neurons.
         self.targets = np.stack(
             [
-                rng.choice(self.n_neurons, size=self.fanout, replace=False)
+                rng.choice(pool, size=self.fanout, replace=False)
                 for _ in range(self.n_pixels)
             ]
         ).astype(np.int64)
@@ -127,19 +171,22 @@ class InputProjection:
             self._refresh_homeo()
         return self._homeo_cache
 
+    def _incoming_sums(self) -> np.ndarray:
+        """Per-neuron sum of incoming weight — robust to empty buckets."""
+        weights = self._weights_flat[self._in_edges]
+        neuron_ids = np.repeat(
+            np.arange(self.n_neurons, dtype=np.int64),
+            np.diff(self._in_offsets).astype(np.int64),
+        )
+        return np.bincount(neuron_ids, weights=weights, minlength=self.n_neurons)
+
     def _refresh_homeo(self) -> None:
         """Recompute and cache the per-neuron homeostatic scale."""
         n_neurons = self.n_neurons
         per_edges = np.diff(self._in_offsets)
         scale = np.ones(n_neurons, dtype=np.float64)
         if self._in_edges.size:
-            flat_w = self._weights_flat[self._in_edges]
-            sums = np.empty(n_neurons, dtype=np.float64)
-            starts = self._in_offsets[:-1]
-            grouped = np.add.reduceat(flat_w, starts)
-            sums[: grouped.size] = grouped
-            if grouped.size < n_neurons:
-                sums[grouped.size :] = 0.0
+            sums = self._incoming_sums()
             target = per_edges.astype(np.float64)
             nz = sums > 0
             scale[nz] = target[nz] / sums[nz]
@@ -207,6 +254,52 @@ class InputProjection:
             float
         )
         return float(counts.mean()), float(counts.std())
+
+    # -- synaptic scaling (Turrigiano et al. 1998) -------------------------
+    def synaptic_scale(self) -> None:
+        """M3.3 homeostatic renormalization of each neuron's input weights.
+
+        After every training image window, each neuron's incoming ``w_in``
+        weights are rescaled multiplicatively so their sum equals
+        ``C = n_in_per_neuron * 0.30`` (``SCALING_TARGET_PER_EDGE``). Because
+        the STDP initials are uniform in [0.2, 0.4] (mean 0.30) this ``C`` is
+        exactly the neuron's initial total power: the homeostasis is neutral on
+        day one and afterwards only *reallocates* correlation structure within
+        a constant power budget. Winning pixels that drive causal spikes grow
+        their share; losing pixels are squeezed. Gated to the training phase
+        (``_learning`` must be on) and to ``plastic`` / ``synaptic_scaling``
+        arms only; assignment/test never rescale.
+        """
+        if not self.plastic or not self.synaptic_scaling:
+            return
+        if not self._learning:
+            return
+        n_neurons = self.n_neurons
+        if self._in_edges.size == 0:
+            return
+
+        per_neuron = np.diff(self._in_offsets).astype(np.float64)
+        sums = self._incoming_sums()
+        target = per_neuron * SCALING_TARGET_PER_EDGE
+        # Fixed-point multiplicative renormalization that hits the per-neuron
+        # sum target C while keeping every weight within [0, 1]: repeatedly
+        # scale, then clamp, then rescale (a clipped edge drops out of the
+        # budget and the remainder is re-shared).
+        for _ in range(64):
+            scale = np.ones(n_neurons, dtype=np.float64)
+            nz = sums > 0
+            scale[nz] = target[nz] / sums[nz]
+            edges_expanded = np.repeat(
+                np.arange(n_neurons, dtype=np.int64), per_neuron.astype(np.int64)
+            )
+            self._weights_flat[self._in_edges] *= scale[edges_expanded]
+            self._weights_flat[self._in_edges] = np.clip(
+                self._weights_flat[self._in_edges], 0.0, 1.0
+            )
+            sums = self._incoming_sums()
+            if np.allclose(sums, target, atol=1e-9):
+                break
+        self._refresh_homeo()
 
     # -- input STDP ---------------------------------------------------------
     def on_input_arrival(self, pixels: np.ndarray, t: int, learn: bool) -> None:

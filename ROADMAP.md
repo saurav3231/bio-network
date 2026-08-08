@@ -83,6 +83,28 @@ population (45k vs 2.6 M train spikes, 0.09 vs 5.24 Hz) and forms no localized
 tiles. See `docs/M3_2_RESULTS.md` and `notebooks/m32_plastic_optic_nerve.ipynb`.
 A balanced homeostatic update rule is the documented follow-up.
 
+### M3.3 -- Homeostatic Regulators ("critical period") (Complete, partial positive)
+
+Fix the M3.2 starvation by adding the two classic biological regulators to the
+plastic optic nerve during training: **synaptic scaling** (Turrigiano et al.
+1998: after every training window each neuron's incoming `w_in` is re-pinned to
+`sum(w_in) == n_in * 0.30`, its day-one power) and **adaptive spike thresholds**
+(Diehl & Cook 2015 intrinsic plasticity: excitatory neurons drift their firing
+threshold within [1, 30] mV toward a 5 Hz target so over-active neurons back
+off and silent ones are recruited), plus the excitatory-only structural
+constraint.
+
+**Status:** Complete as an honest *partial positive*. ARM B beats the
+byte-identical M3.2 baseline on every axis: held-out accuracy 15% -> 39% soft /
+16% -> 34% vote, active neurons 76 -> 342/1000, mean probe rate 0.09 -> 0.17 Hz,
+structured RIA tiles 3 -> 110, with the stability box held (w_in in [0, 1],
+theta in [1, 30], finite recurrent weights, inhibitory frozen). The brain wakes
+up but is not fully awake -- rate stays below the 2 Hz aspiration and only
+~1/3 of the population is recruited. See `docs/M3_3_RESULTS.md` and
+`notebooks/m33_critical_period.ipynb`. A rate-dense / higher-drive variant
+(greater scaling budget or faster threshold recruitment) is the documented
+follow-up.
+
 ## M5 -- Neuromodulation
 
 - Dopamine-like reward prediction error signal (`bio_network/modulation/`).

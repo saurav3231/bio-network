@@ -42,6 +42,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   15% soft / 10% to 16% vote. Follow-up (balanced updating / Euclidean
   homeostasis) is required before a "learned receptive field" claim.
 
+### Added (M3.3: homeostatic regulators -- the "critical period")
+
+- `InputProjection` gains **synaptic scaling** (`synaptic_scaling=True`,
+  Turrigiano et al. 1998) in `bio_network/senses/projections.py`:
+  `synaptic_scale()` renormalizes every neuron's incoming `w_in` after each
+  training window to `sum(w_in) == n_in_per_neuron * 0.30` (the STDP init
+  mean, so day-one power is preserved and regulation only reallocates
+  structure) via a fixed-point scale -> clamp -> rescale loop (up to 64
+  iterations, target to 1e-9) that keeps all weights inside `[0, 1]`.
+- `InputProjection` gains the **excitatory-only structural constraint**
+  (`excitatory_only=True`, `n_excitatory=`): the pixel->neuron fan-out draws
+  only excitatory targets, so no input synapse lands on an inhibitory
+  interneuron; the historical all-neuron wiring stays the default for ARM A.
+- `RetinaStimulus` triggers per-window synaptic scaling at the slot boundary
+  during training (`bio_network/senses/stimulus.py`), frozen in test/assign.
+- `IzhikevichPopulation` gains **adaptive spike thresholds**
+  (`adaptive_thresholds=True`, Diehl & Cook 2015 intrinsic plasticity) in
+  `bio_network/engine/neurons.py`: a per-ms exponential rate low-pass
+  (`rate_tau_ms`, `target_rate_hz` defaults 2000 ms / 5 Hz) drifts each
+  excitatory neuron's threshold `theta` by `theta_gain * (ema - target)` within
+  `[1, 30]` mV; inhibitory neurons stay at the canonical 30. `save_state` /
+  `load_state` now carry `theta` + rate EMA. When disabled the population is
+  bit-canonical to M1-M3.2 (`theta == _THRESHOLD_MV`).
+- `tests/test_homeostasis.py`: 10 tests (scaling reaches target and keeps
+  bounds, scaling-off no-op, adaptive-threshold rig with bounds + determinism,
+  thresholds-off bit-canonical, freeze boundaries, excitatory-only wiring
+  invariant, and a reproducibility + animation-health ARM-style run).
+- `benchmarks/m33_homeostasis.py`: controlled two-arm AB (ARM A = the exact
+  M3.2 plastic baseline, ARM B = scaling + thresholds + excitatory-only) with
+  per-arm `.npz` caches (`--only a|b|ab`) so arms re-run independently,
+  tile / selectivity / readout / stability metrics, health + accuracy-ladder
+  figures, and `docs/M3_3_RESULTS.md`. Protocol: train 1000 / test 200 /
+  probe 60 / seed 42.
+- `docs/M3_3_RESULTS.md` and the executed `notebooks/m33_critical_period.ipynb`.
+
+**Result:** ARM B (scaling + adaptive thresholds) rescues the starved pathway.
+Against the byte-identical ARM A baseline it raises held-out accuracy
+15% -> 39% soft / 16% -> 34% vote, active neurons 76 -> 342/1000, probe-time
+mean rate 0.09 -> 0.17 Hz and structured RIA tiles 3 -> 110, with the stability
+box held (w_in in [0, 1], theta in [1, 30], recurrent weights finite,
+inhibitory frozen). The brain wakes up -- but is not yet awake: rate stays below
+the 2 Hz target and only ~1/3 of the population is recruited, so M3.3 is a
+partial positive after M3.2's controlled negative; rate homeostasis alone does
+not yet float the pathway into a dense, high-rate regime.
+
 ### Added (M3: senses -- retina encoder and visual feature emergence)
 
 - `Retina` (`bio_network/senses/retina.py`): deterministic image -> spike

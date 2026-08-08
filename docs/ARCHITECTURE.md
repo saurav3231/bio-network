@@ -252,12 +252,37 @@ timetables the sparse engine consumes. Four small modules:
   projection may instead be **plastic** (`plastic=True`): it carries per-edge
   input synapses `w_in in [0, 1]` (init uniform 0.2-0.4) that learn with the
   same arrival-time STDP as the recurrent engine (tau 20 ms, A+ 0.10,
-  A- 0.12; Song-Miller-Abbott bounds) -- the firing-side LTP runs through an
+A- 0.12; Song-Miller-Abbott bounds) -- the firing-side LTP runs through an
   incoming-edge reverse adjacency built once at construction, and a per-neuron
   homeostatic target keeps each neuron's total input power equal to its fan-in
   so the plastic arm's drive matches the frozen arm's. `set_learning()` gates
   plasticity to the training phase; `drive_weights()` is a vector of ones when
   frozen and the (homeostatically balanced) `w_in` when plastic.
+- **Homeostatic regulation (M3.3)**. Two biological regulators keep the plastic
+  pathway from starving (the M3.2 diagnosis: LTD on every arrival outpaces LTP
+  that needs a real spike, so `w_in` drains toward zero):
+  - *Synaptic scaling* (`synaptic_scaling=True`, Turrigiano et al. 1998). After
+    every training image window ``RetinaStimulus`` calls
+    ``InputProjection.synaptic_scale()``, a fixed-point loop that renormalizes
+    each neuron's incoming weights so ``sum(w_in) == n_in_per_neuron * 0.30``
+    (the STDP init mean, so day-one total power is preserved and Scaling only
+    reallocates correlation structure within a constant budget). The loop keeps
+    every weight within ``[0, 1]`` by scale-then-clamp-then-rescale until the
+    target is hit to 1e-9 (clamping to the writer-pinned bound). Scaling is
+    gated to the training phase only (`_learning`), exactly like STDP.
+  - *Adaptive spike thresholds* (`adaptive_thresholds=True` on
+    ``IzhikevichPopulation``, Diehl & Cook 2015 intrinsic plasticity). Each
+    excitatory neuron tracks a per-ms exponential rate low-pass
+    (``rate_tau_ms=2000``, ``target_rate_hz=5``) and drifts its firing
+    threshold ``theta`` by ``theta_gain * (ema - target_ema)`` clipped to
+    ``[theta_min, theta_max] = [1, 30]`` mV -- over-active neurons self-limit,
+    silent ones are recruited. Inhibitory neurons keep the canonical threshold.
+    ``save_state/load_state`` preserve ``theta`` and the rate estimate; when
+    disabled ``theta == 30 == _THRESHOLD_MV`` so M1-M3.2 behaviour is
+    bit-identical.
+  - *Structural constraint* (`excitatory_only=True`): the fan-out draws input
+    targets exclusively from the excitatory population so no input synapse
+    lands on an inhibitory interneuron.
 - **`stimulus.py` -- `RetinaStimulus`**: a drop-in `stimulus_fn` for
   `simulate(...)`. Each image owns a time slot of `window_ms + gap_ms`; within
   the window it emits current pulses to the pixels' target neurons (scaled by
@@ -266,21 +291,24 @@ timetables the sparse engine consumes. Four small modules:
   and `__len__` the number of images, so post-hoc per-image spike counts are
   exact (this is how response matrices are built). `set_learning()` propagates
   the learning toggle so the arrival side of input STDP fires exactly on each
-  pixel spike's arrival millisecond.
+  pixel spike's arrival millisecond. At the start of each new slot it applies
+  per-window synaptic scaling when training (M3.3).
 - **`readout.py` -- `LabelsReadout`**: the label-scoped decoder. `fit()` builds
   a per-class mean response fingerprint from the responses of the *training*
-split only; `predict()` scores a trial with the frozen fingerprints. Labels
+  split only; `predict()` scores a trial with the frozen fingerprints. Labels
   never predict the weights: the readout reads *responses*, and fitting happens
   after learning is frozen. `predict_vote()` is the second pre-committed
   decoder (hard per-neuron plurality vote over the frozen assignment), reported
-  alongside `predict()` in the M3.2 two-arm comparison.
+  alongside `predict()` in the M3.2 and M3.3 arms.
 
 Two honesty rules are structural: plasticity is **phase-gated** (input and
 recurrent STDP are on only during training; both parents freeze before
 assignment and test) and **labels never touch the recurrent weights** -- M3 is
 "unsupervised feature emergence," not supervised tuning. Results are recorded
-in `docs/M3_RESULTS.md` and `docs/M3_2_RESULTS.md`; the running notebooks are
-`notebooks/m3_first_light.ipynb` and `notebooks/m32_plastic_optic_nerve.ipynb`.
+in `docs/M3_RESULTS.md`, `docs/M3_2_RESULTS.md` and `docs/M3_3_RESULTS.md`; the
+running notebooks are `notebooks/m3_first_light.ipynb`,
+`notebooks/m32_plastic_optic_nerve.ipynb` and
+`notebooks/m33_critical_period.ipynb`.
 
 References:
 
