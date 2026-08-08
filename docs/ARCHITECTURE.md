@@ -3,9 +3,9 @@
 This document maps each brain mechanism from the README to a software module.
 Milestones M1 through M4 are built: the dense and sparse engines, STDP
 learning, and the episodic/sleep-replay memory loop all exist in `bio_network/`.
-Sensory encoding (M3) and neuromodulation (M5) remain planned. The layout is
-deliberately small so each mechanism can be studied, benchmarked, and swapped
-independently.
+Sensory encoding (M3) now ships as `bio_network/senses/`; neuromodulation (M5)
+remains planned. The layout is deliberately small so each mechanism can be
+studied, benchmarked, and swapped independently.
 
 ```
 +----------+     +---------+     +------------------+     +-----------+
@@ -232,15 +232,60 @@ Visualization of dynamics. The raster module (`raster.py`) plots spike times
 across neurons. Later milestones add firing-rate heatmaps and a live web
 dashboard (M6) that shows network activity and structural growth.
 
-### `bio_network/encoding/` (planned, M3)
+### `bio_network/senses/` -- sensory encoding (M3)
 
-Sensory encoding: converts images (or other high-dimensional inputs) into spike
-trains that the spiking network consumes.
+The artificial retina and input pathway that turn images into the spike
+timetables the sparse engine consumes. Four small modules:
+
+- **`retina.py` -- `Retina`**: converts a 28x28 intensity image (values in
+  [0, 1]) into a sorted `(t_ms, pixel_index)` spike timetable. Two deterministic
+  coding modes: **latency** (one spike per bright pixel at
+  `t = (1 - intensity) * window_ms`, so brighter pixels fire earlier) and
+  **rate** (a Poisson train at `intensity * max_rate_hz`). Determinism comes
+  from an explicit `np.random.default_rng(seed)`; `encode()` is the only entry
+  point.
+- **`projections.py` -- `InputProjection`**: a **frozen, non-plastic** random
+  fan-out from pixels to neurons. Each pixel connects to `fanout` distinct
+  target neurons; the `targets` array is generated once and never updated.
+  `drive_neurons(pixels)` maps a pixel list to the neurons a stimulus should
+  inject, and `fan_in_stats()` reports the per-neuron input fan-in.
+- **`stimulus.py` -- `RetinaStimulus`**: a drop-in `stimulus_fn` for
+  `simulate(...)`. Each image owns a time slot of `window_ms + gap_ms`; within
+  the window it emits current pulses to the pixels' target neurons, and it is
+  silent during the gap. `slot_boundaries(slot)` returns the slot's [t0, t1)
+  and `__len__` the number of images, so post-hoc per-image spike counts are
+  exact (this is how response matrices are built).
+- **`readout.py` -- `LabelsReadout`**: the label-scoped decoder. `fit()` builds
+  a per-class mean response fingerprint from the responses of the *training*
+  split only; `predict()` scores a trial with the frozen fingerprints. Labels
+  never touch the weights: the readout reads *responses*, and fitting happens
+  after learning is frozen.
+
+Two honesty rules are structural: the input projection has **no plasticity**
+(a fixed random fan-out in the Hubel-Wiesel tradition), and **labels never touch
+the recurrent weights** -- M3 is "unsupervised feature emergence," not
+supervised tuning. Results are recorded in `docs/M3_RESULTS.md`; the running
+notebook is `notebooks/m3_first_light.ipynb`.
+
+References:
+
+- Diehl, P. U., & Cook, M. (2015). Unsupervised learning of digit recognition
+  using spike-timing-dependent plasticity. *Frontiers in Computational
+  Neuroscience*, 9, 99.
+- Masquelier, T., & Thorpe, S. J. (2007). Unsupervised learning of visual
+  features through spike timing dependent plasticity. *PLoS Computational
+  Biology*, 3(2), e31.
+
+### `bio_network/viz/` -- plotting and dashboard
+
+Visualization of dynamics. The raster module (`raster.py`) plots spike times
+across neurons. Later milestones add firing-rate heatmaps and a live web
+dashboard (M6) that shows network activity and structural growth.
 
 ## Data flow (one cycle)
 
 1. Input arrives from `senses` (e.g. a pixel array).
-2. The `encoder` converts it to spike trains.
+2. The `encoder` (the `Retina` in `senses/`) converts it to spike trains.
 3. Spikes propagate through the `engine`; the scheduler dispatches events.
 4. `learning` updates weights using local STDP rules.
 5. `memory` records the episode; during a `sleep` phase, `replay` re-runs it.

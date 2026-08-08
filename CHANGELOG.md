@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (M3: senses -- retina encoder and visual feature emergence)
+
+- `Retina` (`bio_network/senses/retina.py`): deterministic image -> spike
+  timetable encoder in two modes -- latency (one spike per bright pixel at
+  `t = (1 - intensity) * window_ms`) and rate (Poisson at
+  `intensity * max_rate_hz`) -- with validation, explicit seeding, and a
+  stable `encode()` API.
+- `InputProjection` (`bio_network/senses/projections.py`): frozen, non-plastic
+  random pixel-to-neuron fan-out (`fanout` targets per pixel), with
+  `drive_neurons()` and `fan_in_stats()`.
+- `RetinaStimulus` (`bio_network/senses/stimulus.py`): drop-in `stimulus_fn`
+  presenting images as windowed current pulses with silent gaps, slot
+  boundaries, and `__len__` for exact per-image response slicing.
+- `LabelsReadout` (`bio_network/senses/readout.py`): label-scoped decoder that
+  fits per-class response fingerprints on the training split only and predicts
+  with frozen fingerprints (labels never touch weights).
+- `mnist.load_mnist()` / `mnist.subsample_mnist()` (`bio_network/senses/mnist.py`):
+  Keras -> scikit-learn -> raw IDX download fallback loader with a local
+  `notebooks/data/` cache.
+- `tests/test_retina.py`: 13 tests (encoder determinism, latency Spearman /
+  rate Pearson fidelity, window and gap silence, dark-image silence, frozen
+  projections, readout label-gating and pre-fit guard, training-run health,
+  white-over-dark visibility).
+- `benchmarks/m3_vision.py` (E3a encoder fidelity, E3b RIA feature emergence,
+  E3c frozen-readout vs chance and kNN, E3d stability guards) and
+  `benchmarks/build_m3_notebook.py`; executed `notebooks/m3_first_light.ipynb`
+  with `notebooks/output/m3_emergence_tiles.png` and `m3_confusion.png`.
+- `docs/M3_RESULTS.md`, ARCHITECTURE senses section, ROADMAP M3 Complete.
+
+### Fixed (sparse-delivery learning bug)
+
+- `SparseSynapses.deliver` was booking arrival-time LTD events for *all* fired
+  neurons, including inhibitory ones, clipping their negative weights toward 0
+  even though inhibitory weights must stay frozen. Delivery now books learning
+  events only for excitatory neurons (`i < n_excit`), keeping inhibitory
+  weights bit-frozen during STDP. Verified by the M3 training run
+  (16 inhibitory spikes exercised, weights unchanged).
+
 ### Added
 
 - Initial repository scaffolding: README, ROADMAP, ARCHITECTURE, community

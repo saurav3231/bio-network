@@ -52,11 +52,37 @@ recall after a cue (E4a, post/pre 1.407 > 1.3) in `docs/M4_RESULTS.md`, and
 the replay arm retains T1 after learning T2 (E4b, retention advantage 2.49x >
 1.25) while both arms acquire T2 equally. See `notebooks/m4_sleep_consolidation.ipynb`.
 
-## M3 -- Sensory Encoding (Current)
+## M4 -- Memory + Sleep Phase (Complete)
 
-- Convert images to spike trains (`bio_network/encoding/`).
+- One-shot episodic store (`bio_network/memory/episodic.py`).
+- Offline replay of stored episodes (`bio_network/memory/replay.py`).
+- Sleep/consolidation loop that replays and strengthens recent memories while
+  learning new ones.
+
+**Exit criteria:** on the sparse engine with STDP, replaying a stored wake
+episode during sleep measurably strengthens the learned association, and
+learning a second association afterward does not erase the first.
+
+**Status:** Complete. 48 tests pass. Sleep replay of the P1 melody lifts
+recall after a cue (E4a, post/pre 1.407 > 1.3) in `docs/M4_RESULTS.md`, and
+the replay arm retains T1 after learning T2 (E4b, retention advantage 2.49x >
+1.25) while both arms acquire T2 equally. See `notebooks/m4_sleep_consolidation.ipynb`.
+
+## M3 -- Sensory Encoding (Complete)
+
+- Convert images to spike trains (`bio_network/senses/`: `Retina` encoder,
+  `InputProjection` fan-out, `RetinaStimulus` presenter).
 - Unsupervised pattern recognition: the network clusters or discriminates input
-  classes from spike statistics alone.
+  classes from spike statistics alone (`LabelsReadout` on frozen responses).
+
+**Status:** Complete. The retina encoder is exact (E3a, latency Spearman 1.000,
+rate Pearson 0.999); unsupervised STDP on a frozen input projection creates
+class-selective feature neurons (E3b, selective 0 -> 44) and a frozen
+label-scoped readout decodes held-out digits at 0.20 vs chance 0.10 and kNN
+0.60 (E3c) in `docs/M3_RESULTS.md`. 61 tests pass. The input projection is
+intentionally non-plastic; a learned input weight matrix (Diehl & Cook 2015;
+Masquelier & Thorpe 2007) is the planned v2 upgrade. See
+`notebooks/m3_first_light.ipynb`.
 
 ## M5 -- Neuromodulation
 

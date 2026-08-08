@@ -302,15 +302,17 @@ class SparseSynapses:
             queue[slot, row] += weights[start:end]
 
         if learn and self._learning_enabled:
-            # Book every fired excitatory synapse for arrival-time LTD,
-            # bucketed by the ring-buffer slot it will arrive in.
-            ids = np.concatenate(
-                [
-                    np.arange(int(offsets[i]), int(offsets[i + 1]))
-                    for i in fired
-                    if int(offsets[i + 1]) > int(offsets[i])
-                ]
-            )
+            # Book every fired EXCITATORY synapse for arrival-time LTD,
+            # bucketed by the ring-buffer slot it will arrive in. Plasticity is
+            # excitatory-only (see ARCHITECTURE.md); inhibitory synapses are
+            # frozen, so an inhibitory neuron firing must never enqueue an
+            # arrival event for its (negative) outgoing weights.
+            blocks = [
+                np.arange(int(offsets[i]), int(offsets[i + 1]))
+                for i in fired
+                if i < self.n_excit and int(offsets[i + 1]) > int(offsets[i])
+            ]
+            ids = np.concatenate(blocks) if blocks else np.empty(0, dtype=np.int64)
             if ids.size:
                 slot_arr = (t + delays[ids]) % max_delay
                 for s in np.unique(slot_arr):

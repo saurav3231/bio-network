@@ -53,6 +53,9 @@ coverage.xml
 .ipynb_checkpoints
 *_Notebooks_Checkpoints/
 
+# Dataset caches (M3): MNIST raw + npz live under notebooks/data
+notebooks/data/
+
 # IPython
 profile_default/
 ipython_config.py
