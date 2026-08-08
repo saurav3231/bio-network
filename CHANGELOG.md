@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-08
+
 ### Added (M3.2: plastic input projection / optic-nerve STDP)
 
 - `InputProjection` learns (`plastic=True`): per-channel input synapses
@@ -225,3 +227,6 @@ not yet float the pathway into a dense, high-rate regime.
   `notebooks/m4_sleep_consolidation.ipynb` (executed, with
   `notebooks/output/m4_e4a_recall.png`, `m4_e4b_continual.png`,
   `m4_protocol_rates.png`).
+
+[Unreleased]: https://github.com/saurav3231/bio-network/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/saurav3231/bio-network/releases/tag/v0.1.0
